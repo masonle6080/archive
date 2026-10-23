@@ -7,7 +7,7 @@ import type {
   Revision,
   RevisionDetail
 } from '../../../shared/types'
-import { slugify } from '@renderer/lib/slug'
+import { slugify } from '@shared/slug'
 import { mediaUrl } from '@renderer/lib/media'
 import { formatDate, formatDateTime } from '@renderer/lib/date'
 import { renderMarkdown } from '@renderer/lib/markdown'

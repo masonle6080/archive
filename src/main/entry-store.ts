@@ -5,24 +5,87 @@ import type {
   PostDetail,
   PostSummary,
   MediaItem,
+  MediaInput,
   MediaType,
   PostInput,
   Category,
   Revision,
   RevisionDetail
 } from '../shared/types'
+import { slugify } from '../shared/slug'
 
-interface PostRow {
+// The content fields of an entry, defined once. Each maps an entry-shape field
+// to the column that holds it in both the `post` and `post_revision` tables.
+// Categories are the seventh content field; they live in their own table.
+const CONTENT_COLUMNS = {
+  title: 'title',
+  excerpt: 'excerpt',
+  body: 'body',
+  coverImagePath: 'cover_image_path',
+  coverImageCaption: 'cover_image_caption',
+  brainstorm: 'brainstorm'
+} as const
+
+type ColumnField = keyof typeof CONTENT_COLUMNS
+const COLUMN_FIELDS = Object.keys(CONTENT_COLUMNS) as ColumnField[]
+const COLUMN_NAMES = COLUMN_FIELDS.map((f) => CONTENT_COLUMNS[f])
+
+// Fields where empty and missing count as equal for change detection.
+const BLANK_EQUALS_MISSING: ReadonlySet<ColumnField> = new Set([
+  'excerpt',
+  'coverImageCaption',
+  'brainstorm'
+])
+
+/** An entry's content: everything a revision captures. */
+type Content = Pick<PostInput, ColumnField | 'categories'>
+
+type ContentRow = Record<(typeof COLUMN_NAMES)[number], string | null>
+
+function contentFromRow(row: ContentRow, categories: string[]): Content {
+  const content = { categories } as Record<string, unknown>
+  for (const field of COLUMN_FIELDS) content[field] = row[CONTENT_COLUMNS[field]]
+  return content as Content
+}
+
+function contentValues(content: Content): (string | null)[] {
+  return COLUMN_FIELDS.map((field) => content[field])
+}
+
+/** Picks just the content fields out of a larger shape, such as an input. */
+function contentOf(source: Content): Content {
+  const content = { categories: source.categories } as Record<string, unknown>
+  for (const field of COLUMN_FIELDS) content[field] = source[field]
+  return content as Content
+}
+
+function sameCategories(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const sa = [...a].sort()
+  const sb = [...b].sort()
+  return sa.every((v, i) => v === sb[i])
+}
+
+function contentChanged(current: Content, next: Content): boolean {
+  const fieldChanged = COLUMN_FIELDS.some((field) =>
+    BLANK_EQUALS_MISSING.has(field)
+      ? (current[field] ?? '') !== (next[field] ?? '')
+      : current[field] !== next[field]
+  )
+  return fieldChanged || !sameCategories(current.categories, next.categories)
+}
+
+interface EntryRow extends ContentRow {
   id: number
   slug: string
-  title: string
-  excerpt: string | null
-  body: string
-  cover_image_path: string | null
-  cover_image_caption: string | null
-  brainstorm: string | null
   created_at: string
   updated_at: string
+}
+
+interface RevisionRow extends ContentRow {
+  id: number
+  created_at: string
+  categories: string
 }
 
 interface MediaRow {
@@ -53,10 +116,13 @@ export interface EntryStore {
 }
 
 // The entry store reads and writes entries, categories, and revisions in the
-// given database. It still removes replaced gallery media and a deleted
-// entry's files from the media folder, as the app did before the archive seam.
+// given database. Every create, update, revert, and delete runs in one
+// transaction. It still removes dropped gallery media and a deleted entry's
+// files from the media folder, after the transaction commits.
 export function createEntryStore(db: Database.Database, mediaDir: string): EntryStore {
-  function categoriesForPost(postId: number): string[] {
+  const ENTRY_COLUMNS = `post.id, post.slug, post.created_at, post.updated_at, ${COLUMN_NAMES.map((c) => `post.${c}`).join(', ')}`
+
+  function categoriesFor(entryId: number): string[] {
     const rows = db
       .prepare(
         `SELECT tag.name AS name
@@ -65,68 +131,244 @@ export function createEntryStore(db: Database.Database, mediaDir: string): Entry
          WHERE post_tag.post_id = ?
          ORDER BY tag.name ASC`
       )
-      .all(postId) as { name: string }[]
+      .all(entryId) as { name: string }[]
     return rows.map((r) => r.name)
   }
 
-  function toSummary(row: PostRow): PostSummary {
+  function toDetailWithoutMedia(row: EntryRow): Omit<PostDetail, 'media'> {
     return {
       id: row.id,
       slug: row.slug,
-      title: row.title,
-      excerpt: row.excerpt,
-      coverImagePath: row.cover_image_path,
-      coverImageCaption: row.cover_image_caption,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      categories: categoriesForPost(row.id)
+      ...contentFromRow(row, categoriesFor(row.id))
     }
   }
 
-  const POST_COLUMNS = `id, slug, title, excerpt, body, cover_image_path, cover_image_caption, brainstorm, created_at, updated_at`
-  const POST_COLUMNS_QUALIFIED = `post.id, post.slug, post.title, post.excerpt, post.body, post.cover_image_path, post.cover_image_caption, post.brainstorm, post.created_at, post.updated_at`
+  function toSummary(row: EntryRow): PostSummary {
+    const { body, brainstorm, ...summary } = toDetailWithoutMedia(row)
+    return summary
+  }
 
   function listEntries(categoryId: number | null): PostSummary[] {
     const rows = categoryId
       ? (db
           .prepare(
-            `SELECT DISTINCT ${POST_COLUMNS_QUALIFIED}
+            `SELECT DISTINCT ${ENTRY_COLUMNS}
              FROM post
              JOIN post_tag ON post_tag.post_id = post.id
              WHERE post_tag.tag_id = ?
              ORDER BY post.created_at DESC`
           )
-          .all(categoryId) as PostRow[])
-      : (db.prepare(`SELECT ${POST_COLUMNS} FROM post ORDER BY created_at DESC`).all() as PostRow[])
+          .all(categoryId) as EntryRow[])
+      : (db.prepare(`SELECT ${ENTRY_COLUMNS} FROM post ORDER BY post.created_at DESC`).all() as EntryRow[])
 
     return rows.map(toSummary)
   }
 
-  function getPostBySlug(slug: string): PostDetail | null {
-    const row = db.prepare(`SELECT ${POST_COLUMNS} FROM post WHERE slug = ?`).get(slug) as
-      | PostRow
-      | undefined
-
-    if (!row) return null
-
-    const mediaRows = db
+  function mediaFor(entryId: number): MediaItem[] {
+    const rows = db
       .prepare(
         `SELECT id, type, file_path, alt_text, "order"
          FROM media
          WHERE post_id = ?
          ORDER BY "order" ASC`
       )
-      .all(row.id) as MediaRow[]
-
-    const media: MediaItem[] = mediaRows.map((m) => ({
+      .all(entryId) as MediaRow[]
+    return rows.map((m) => ({
       id: m.id,
       type: m.type,
       filePath: m.file_path,
       altText: m.alt_text,
       order: m.order
     }))
+  }
 
-    return { ...toSummary(row), body: row.body, brainstorm: row.brainstorm, media }
+  function getBySlug(slug: string): PostDetail | null {
+    const row = db.prepare(`SELECT ${ENTRY_COLUMNS} FROM post WHERE post.slug = ?`).get(slug) as
+      | EntryRow
+      | undefined
+    if (!row) return null
+    return { ...toDetailWithoutMedia(row), media: mediaFor(row.id) }
+  }
+
+  function getById(id: number): PostDetail {
+    const row = db.prepare(`SELECT slug FROM post WHERE id = ?`).get(id) as { slug: string } | undefined
+    if (!row) throw new Error('Entry not found')
+    return getBySlug(row.slug) as PostDetail
+  }
+
+  function readContent(entryId: number): Content | null {
+    const row = db.prepare(`SELECT ${COLUMN_NAMES.join(', ')} FROM post WHERE id = ?`).get(entryId) as
+      | ContentRow
+      | undefined
+    return row ? contentFromRow(row, categoriesFor(entryId)) : null
+  }
+
+  function snapshotRevision(entryId: number, content: Content): void {
+    db.prepare(
+      `INSERT INTO post_revision (post_id, ${COLUMN_NAMES.join(', ')}, categories)
+       VALUES (?, ${COLUMN_NAMES.map(() => '?').join(', ')}, ?)`
+    ).run(entryId, ...contentValues(content), JSON.stringify(content.categories))
+  }
+
+  function replaceCategories(entryId: number, categoryNames: string[]): void {
+    db.prepare(`DELETE FROM post_tag WHERE post_id = ?`).run(entryId)
+
+    const insertCategory = db.prepare(`INSERT OR IGNORE INTO tag (name, slug) VALUES (?, ?)`)
+    const findCategory = db.prepare(`SELECT id FROM tag WHERE name = ?`)
+    const linkCategory = db.prepare(`INSERT OR IGNORE INTO post_tag (post_id, tag_id) VALUES (?, ?)`)
+
+    for (const rawName of categoryNames) {
+      const name = rawName.trim()
+      if (!name) continue
+      insertCategory.run(name, slugify(name))
+      const category = findCategory.get(name) as { id: number }
+      linkCategory.run(entryId, category.id)
+    }
+  }
+
+  /** Replaces the gallery media rows. Returns the file names no longer used. */
+  function replaceMedia(entryId: number, media: MediaInput[]): string[] {
+    const existing = db.prepare(`SELECT file_path FROM media WHERE post_id = ?`).all(entryId) as {
+      file_path: string
+    }[]
+    const kept = new Set(media.map((m) => m.filePath))
+
+    db.prepare(`DELETE FROM media WHERE post_id = ?`).run(entryId)
+    const insertMedia = db.prepare(
+      `INSERT INTO media (post_id, type, file_path, alt_text, "order") VALUES (?, ?, ?, ?, ?)`
+    )
+    media.forEach((m, index) => insertMedia.run(entryId, m.type, m.filePath, m.altText, index))
+
+    return existing.map((r) => r.file_path).filter((f) => !kept.has(f))
+  }
+
+  function removeFiles(fileNames: string[]): void {
+    for (const fileName of fileNames) {
+      try {
+        unlinkSync(join(mediaDir, fileName))
+      } catch {
+        // file already gone — nothing to clean up
+      }
+    }
+  }
+
+  interface ContentWrite {
+    /** The entry to write, or null to create one. */
+    entryId: number | null
+    content: Content
+    /** The new slug. Omit to keep the current one (revert). */
+    slug?: string
+    /** The new gallery media. Omit to keep the current rows (revert). */
+    media?: MediaInput[]
+  }
+
+  // The one content-write path for create, update, and revert. Call it inside
+  // a transaction. Returns the entry id and the gallery files it dropped.
+  function writeContent({ entryId, content, slug, media }: ContentWrite): {
+    entryId: number
+    droppedFiles: string[]
+  } {
+    let id: number
+    if (entryId === null) {
+      const result = db
+        .prepare(
+          `INSERT INTO post (slug, ${COLUMN_NAMES.join(', ')}, status, published_at, updated_at)
+           VALUES (?, ${COLUMN_NAMES.map(() => '?').join(', ')}, 'published', ?, datetime('now'))`
+        )
+        .run(slug, ...contentValues(content), new Date().toISOString())
+      id = Number(result.lastInsertRowid)
+    } else {
+      const current = readContent(entryId)
+      if (!current) throw new Error('Entry not found')
+      if (contentChanged(current, content)) snapshotRevision(entryId, current)
+
+      const assignments = COLUMN_NAMES.map((c) => `${c} = ?`)
+      if (slug !== undefined) assignments.unshift('slug = ?')
+      db.prepare(
+        `UPDATE post SET ${assignments.join(', ')}, updated_at = datetime('now') WHERE id = ?`
+      ).run(...(slug !== undefined ? [slug] : []), ...contentValues(content), entryId)
+      id = entryId
+    }
+
+    replaceCategories(id, content.categories)
+    const droppedFiles = media ? replaceMedia(id, media) : []
+    return { entryId: id, droppedFiles }
+  }
+
+  function saveEntry(entryId: number | null, input: PostInput): PostDetail {
+    const write = db.transaction(() =>
+      writeContent({
+        entryId,
+        content: contentOf(input),
+        slug: slugify(input.slug),
+        media: input.media
+      })
+    )
+    const { entryId: id, droppedFiles } = write()
+    removeFiles(droppedFiles)
+    return getById(id)
+  }
+
+  function revertToRevision(entryId: number, revisionId: number): PostDetail {
+    db.transaction(() => {
+      const revision = readRevision(entryId, revisionId)
+      if (!revision) throw new Error('Revision not found')
+      // writeContent snapshots the pre-revert content only when it differs
+      // from the target, so a revert can itself be undone.
+      writeContent({ entryId, content: contentOf(revision) })
+    })()
+    return getById(entryId)
+  }
+
+  function updateBrainstorm(id: number, text: string): void {
+    db.prepare(`UPDATE post SET brainstorm = ? WHERE id = ?`).run(text, id)
+  }
+
+  function deleteEntry(id: number): void {
+    const remove = db.transaction((): string[] => {
+      const row = db.prepare(`SELECT cover_image_path FROM post WHERE id = ?`).get(id) as
+        | { cover_image_path: string | null }
+        | undefined
+      if (!row) return []
+
+      const files = (
+        db.prepare(`SELECT file_path FROM media WHERE post_id = ?`).all(id) as { file_path: string }[]
+      ).map((m) => m.file_path)
+      if (row.cover_image_path) files.push(row.cover_image_path)
+
+      // ON DELETE CASCADE removes the media, post_tag, and revision rows.
+      db.prepare(`DELETE FROM post WHERE id = ?`).run(id)
+      return files
+    })
+    removeFiles(remove())
+  }
+
+  function listRevisions(entryId: number): Revision[] {
+    return db
+      .prepare(
+        `SELECT id, created_at AS createdAt, title
+         FROM post_revision
+         WHERE post_id = ?
+         ORDER BY created_at DESC, id DESC`
+      )
+      .all(entryId) as Revision[]
+  }
+
+  function readRevision(entryId: number, revisionId: number): RevisionDetail | null {
+    const row = db
+      .prepare(
+        `SELECT id, created_at, ${COLUMN_NAMES.join(', ')}, categories
+         FROM post_revision WHERE id = ? AND post_id = ?`
+      )
+      .get(revisionId, entryId) as RevisionRow | undefined
+    if (!row) return null
+    return {
+      id: row.id,
+      createdAt: row.created_at,
+      ...contentFromRow(row, JSON.parse(row.categories) as string[])
+    }
   }
 
   function listCategoriesWithCounts(): Category[] {
@@ -144,15 +386,11 @@ export function createEntryStore(db: Database.Database, mediaDir: string): Entry
   }
 
   function updateCategoryDescription(id: number, description: string): void {
-    db
-      .prepare(`UPDATE tag SET description = ? WHERE id = ?`)
-      .run(description || null, id)
+    db.prepare(`UPDATE tag SET description = ? WHERE id = ?`).run(description || null, id)
   }
 
   function setCategoryFavorite(id: number, favorite: boolean): void {
-    db
-      .prepare(`UPDATE tag SET favorite = ? WHERE id = ?`)
-      .run(favorite ? 1 : 0, id)
+    db.prepare(`UPDATE tag SET favorite = ? WHERE id = ?`).run(favorite ? 1 : 0, id)
   }
 
   function reorderCategories(orderedIds: number[]): void {
@@ -162,14 +400,6 @@ export function createEntryStore(db: Database.Database, mediaDir: string): Entry
     })()
   }
 
-  function slugifyCategory(name: string): string {
-    return name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-  }
-
   function createCategory(name: string): Category {
     const trimmed = name.trim()
     const nextOrder = db.prepare(`SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM tag`).get() as {
@@ -177,7 +407,7 @@ export function createEntryStore(db: Database.Database, mediaDir: string): Entry
     }
     db.prepare(`INSERT OR IGNORE INTO tag (name, slug, sort_order) VALUES (?, ?, ?)`).run(
       trimmed,
-      slugifyCategory(trimmed),
+      slugify(trimmed),
       nextOrder.next
     )
     const row = db.prepare(`SELECT id, name FROM tag WHERE name = ?`).get(trimmed) as {
@@ -189,343 +419,22 @@ export function createEntryStore(db: Database.Database, mediaDir: string): Entry
 
   function renameCategory(id: number, name: string): void {
     const trimmed = name.trim()
-    db
-      .prepare(`UPDATE tag SET name = ?, slug = ? WHERE id = ?`)
-      .run(trimmed, slugifyCategory(trimmed), id)
+    db.prepare(`UPDATE tag SET name = ?, slug = ? WHERE id = ?`).run(trimmed, slugify(trimmed), id)
   }
 
   function deleteCategory(id: number): void {
     db.prepare(`DELETE FROM tag WHERE id = ?`).run(id)
   }
 
-  function setPostCategories(db: Database.Database, postId: number, categoryNames: string[]): void {
-    db.prepare(`DELETE FROM post_tag WHERE post_id = ?`).run(postId)
-
-    const insertCategory = db.prepare(`INSERT OR IGNORE INTO tag (name, slug) VALUES (?, ?)`)
-    const findCategory = db.prepare(`SELECT id FROM tag WHERE name = ?`)
-    const linkCategory = db.prepare(`INSERT OR IGNORE INTO post_tag (post_id, tag_id) VALUES (?, ?)`)
-
-    for (const rawName of categoryNames) {
-      const name = rawName.trim()
-      if (!name) continue
-      insertCategory.run(name, slugifyCategory(name))
-      const category = findCategory.get(name) as { id: number }
-      linkCategory.run(postId, category.id)
-    }
-  }
-
-  function setPostMedia(db: Database.Database, postId: number, media: PostInput['media']): void {
-    const existing = db
-      .prepare(`SELECT file_path FROM media WHERE post_id = ?`)
-      .all(postId) as { file_path: string }[]
-
-    const keptPaths = new Set(media.map((m) => m.filePath))
-
-    for (const row of existing) {
-      if (!keptPaths.has(row.file_path)) {
-        try {
-          unlinkSync(join(mediaDir, row.file_path))
-        } catch {
-          // file already gone — nothing to clean up
-        }
-      }
-    }
-
-    db.prepare(`DELETE FROM media WHERE post_id = ?`).run(postId)
-
-    const insertMedia = db.prepare(
-      `INSERT INTO media (post_id, type, file_path, alt_text, "order") VALUES (?, ?, ?, ?, ?)`
-    )
-    media.forEach((m, index) => {
-      insertMedia.run(postId, m.type, m.filePath, m.altText, index)
-    })
-  }
-
-  function createPost(input: PostInput): PostDetail {
-    const now = new Date().toISOString()
-
-    const result = db
-      .prepare(
-        `INSERT INTO post (slug, title, excerpt, body, cover_image_path, cover_image_caption, brainstorm, status, published_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'published', ?, datetime('now'))`
-      )
-      .run(
-        input.slug,
-        input.title,
-        input.excerpt,
-        input.body,
-        input.coverImagePath,
-        input.coverImageCaption,
-        input.brainstorm,
-        now
-      )
-
-    const postId = Number(result.lastInsertRowid)
-    setPostCategories(db, postId, input.categories)
-    setPostMedia(db, postId, input.media)
-
-    return getPostBySlug(input.slug) as PostDetail
-  }
-
-  interface ContentFields {
-    title: string
-    excerpt: string | null
-    body: string
-    coverImagePath: string | null
-    coverImageCaption: string | null
-    brainstorm: string | null
-    categories: string[]
-  }
-
-  function categoriesEqual(a: string[], b: string[]): boolean {
-    if (a.length !== b.length) return false
-    const sa = [...a].sort()
-    const sb = [...b].sort()
-    return sa.every((v, i) => v === sb[i])
-  }
-
-  function contentChanged(current: ContentFields, next: ContentFields): boolean {
-    return (
-      current.title !== next.title ||
-      (current.excerpt ?? '') !== (next.excerpt ?? '') ||
-      current.body !== next.body ||
-      current.coverImagePath !== next.coverImagePath ||
-      (current.coverImageCaption ?? '') !== (next.coverImageCaption ?? '') ||
-      (current.brainstorm ?? '') !== (next.brainstorm ?? '') ||
-      !categoriesEqual(current.categories, next.categories)
-    )
-  }
-
-  function currentContentFields(db: Database.Database, postId: number): ContentFields | null {
-    const row = db
-      .prepare(
-        `SELECT title, excerpt, body, cover_image_path, cover_image_caption, brainstorm FROM post WHERE id = ?`
-      )
-      .get(postId) as
-      | {
-          title: string
-          excerpt: string | null
-          body: string
-          cover_image_path: string | null
-          cover_image_caption: string | null
-          brainstorm: string | null
-        }
-      | undefined
-    if (!row) return null
-
-    return {
-      title: row.title,
-      excerpt: row.excerpt,
-      body: row.body,
-      coverImagePath: row.cover_image_path,
-      coverImageCaption: row.cover_image_caption,
-      brainstorm: row.brainstorm,
-      categories: categoriesForPost(postId)
-    }
-  }
-
-  function snapshotRevision(db: Database.Database, postId: number): void {
-    const row = db
-      .prepare(
-        `SELECT title, excerpt, body, cover_image_path, cover_image_caption, brainstorm FROM post WHERE id = ?`
-      )
-      .get(postId) as
-      | {
-          title: string
-          excerpt: string | null
-          body: string
-          cover_image_path: string | null
-          cover_image_caption: string | null
-          brainstorm: string | null
-        }
-      | undefined
-    if (!row) return
-
-    db.prepare(
-      `INSERT INTO post_revision (post_id, title, excerpt, body, cover_image_path, cover_image_caption, brainstorm, categories)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      postId,
-      row.title,
-      row.excerpt,
-      row.body,
-      row.cover_image_path,
-      row.cover_image_caption,
-      row.brainstorm,
-      JSON.stringify(categoriesForPost(postId))
-    )
-  }
-
-  function listRevisions(postId: number): Revision[] {
-    return db
-      .prepare(
-        `SELECT id, created_at AS createdAt, title
-         FROM post_revision
-         WHERE post_id = ?
-         ORDER BY created_at DESC`
-      )
-      .all(postId) as Revision[]
-  }
-
-  function getRevision(postId: number, revisionId: number): RevisionDetail | null {
-    const row = db
-      .prepare(
-        `SELECT id, created_at AS createdAt, title, excerpt, body,
-                cover_image_path AS coverImagePath, cover_image_caption AS coverImageCaption,
-                brainstorm, categories
-         FROM post_revision WHERE id = ? AND post_id = ?`
-      )
-      .get(revisionId, postId) as
-      | {
-          id: number
-          createdAt: string
-          title: string
-          excerpt: string | null
-          body: string
-          coverImagePath: string | null
-          coverImageCaption: string | null
-          brainstorm: string | null
-          categories: string
-        }
-      | undefined
-    if (!row) return null
-
-    return { ...row, categories: JSON.parse(row.categories) as string[] }
-  }
-
-  function revertToRevision(postId: number, revisionId: number): PostDetail {
-    const revision = db
-      .prepare(
-        `SELECT title, excerpt, body, cover_image_path, cover_image_caption, brainstorm, categories
-         FROM post_revision WHERE id = ? AND post_id = ?`
-      )
-      .get(revisionId, postId) as
-      | {
-          title: string
-          excerpt: string | null
-          body: string
-          cover_image_path: string | null
-          cover_image_caption: string | null
-          brainstorm: string | null
-          categories: string
-        }
-      | undefined
-    if (!revision) throw new Error('Revision not found')
-
-    const current = currentContentFields(db, postId)
-    const target: ContentFields = {
-      title: revision.title,
-      excerpt: revision.excerpt,
-      body: revision.body,
-      coverImagePath: revision.cover_image_path,
-      coverImageCaption: revision.cover_image_caption,
-      brainstorm: revision.brainstorm,
-      categories: JSON.parse(revision.categories) as string[]
-    }
-
-    // Snapshot the current (pre-revert) state too, so reverting is itself
-    // reversible through the same history list — but only if it's actually
-    // different from what we're reverting to.
-    if (current && contentChanged(current, target)) {
-      snapshotRevision(db, postId)
-    }
-
-    db.prepare(
-      `UPDATE post
-       SET title = ?, excerpt = ?, body = ?, cover_image_path = ?, cover_image_caption = ?, brainstorm = ?, updated_at = datetime('now')
-       WHERE id = ?`
-    ).run(
-      revision.title,
-      revision.excerpt,
-      revision.body,
-      revision.cover_image_path,
-      revision.cover_image_caption,
-      revision.brainstorm,
-      postId
-    )
-
-    setPostCategories(db, postId, JSON.parse(revision.categories) as string[])
-
-    const slugRow = db.prepare(`SELECT slug FROM post WHERE id = ?`).get(postId) as { slug: string }
-    return getPostBySlug(slugRow.slug) as PostDetail
-  }
-
-  function updatePost(id: number, input: PostInput): PostDetail {
-    const current = currentContentFields(db, id)
-    if (
-      current &&
-      contentChanged(current, {
-        title: input.title,
-        excerpt: input.excerpt,
-        body: input.body,
-        coverImagePath: input.coverImagePath,
-        coverImageCaption: input.coverImageCaption,
-        brainstorm: input.brainstorm,
-        categories: input.categories
-      })
-    ) {
-      snapshotRevision(db, id)
-    }
-
-    db.prepare(
-      `UPDATE post
-       SET slug = ?, title = ?, excerpt = ?, body = ?, cover_image_path = ?, cover_image_caption = ?, brainstorm = ?, updated_at = datetime('now')
-       WHERE id = ?`
-    ).run(
-      input.slug,
-      input.title,
-      input.excerpt,
-      input.body,
-      input.coverImagePath,
-      input.coverImageCaption,
-      input.brainstorm,
-      id
-    )
-
-    setPostCategories(db, id, input.categories)
-    setPostMedia(db, id, input.media)
-
-    return getPostBySlug(input.slug) as PostDetail
-  }
-
-  function updateBrainstorm(id: number, text: string): void {
-    db.prepare(`UPDATE post SET brainstorm = ? WHERE id = ?`).run(text, id)
-  }
-
-  function deletePost(id: number): void {
-    const row = db
-      .prepare(`SELECT cover_image_path FROM post WHERE id = ?`)
-      .get(id) as { cover_image_path: string | null } | undefined
-    if (!row) return
-
-    const mediaRows = db.prepare(`SELECT file_path FROM media WHERE post_id = ?`).all(id) as {
-      file_path: string
-    }[]
-
-    const filesToRemove = mediaRows.map((m) => m.file_path)
-    if (row.cover_image_path) filesToRemove.push(row.cover_image_path)
-
-    for (const fileName of filesToRemove) {
-      try {
-        unlinkSync(join(mediaDir, fileName))
-      } catch {
-        // file already gone — nothing to clean up
-      }
-    }
-
-    // ON DELETE CASCADE removes the media and post_tag rows.
-    db.prepare(`DELETE FROM post WHERE id = ?`).run(id)
-  }
-
   return {
     list: listEntries,
-    getBySlug: getPostBySlug,
-    create: createPost,
-    update: updatePost,
+    getBySlug,
+    create: (input) => saveEntry(null, input),
+    update: (id, input) => saveEntry(id, input),
     updateBrainstorm,
-    delete: deletePost,
+    delete: deleteEntry,
     listRevisions,
-    getRevision,
+    getRevision: readRevision,
     revertToRevision,
     listCategories: listCategoriesWithCounts,
     createCategory,
