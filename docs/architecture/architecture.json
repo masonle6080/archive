@@ -1,0 +1,3397 @@
+{
+  "meta": {
+    "project": "Archive",
+    "schema_version": 2,
+    "removed": [],
+    "revisions": [
+      {
+        "rev": 1,
+        "kind": "baseline",
+        "commit": "e0462f3ae42019ce450af4cb5798277301ba1644",
+        "dirty": true,
+        "date": "2026-10-23",
+        "summary": "First diagram: Electron main process, preload bridge, React renderer, and 4 data stores and tools, down to key functions."
+      }
+    ],
+    "generated_from_commit": "e0462f3ae42019ce450af4cb5798277301ba1644",
+    "dirty": true,
+    "generated_at": "2026-10-23"
+  },
+  "components": [
+    {
+      "id": "archive",
+      "level": "System",
+      "name": "Archive",
+      "purpose": "A private, local desktop journal for macOS. The user writes Markdown entries with categories, a cover image, and media, and browses them offline.",
+      "location": [
+        "./"
+      ],
+      "depends_on": [],
+      "data_in": "Entry text, categories, image and video files, and settings from the user",
+      "data_out": "Rendered entries, a SQLite database, copied media files, and a settings file on the local disk",
+      "notes": "There is no server and no network sync. All data stays in ~/Library/Application Support/field-notes. There are no tests in the repository.",
+      "actors": [
+        "The single local user, who writes and reads entries"
+      ],
+      "external_services": [
+        "ffmpeg (optional local binary, used to remux imported videos)"
+      ],
+      "data_stores": [
+        "blog.db: SQLite database with entries, media rows, categories, and revisions",
+        "media/: copied image and video files, named by UUID",
+        "settings.json: user name, quote bank, goals, and theme choice"
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "ext:ffmpeg",
+      "parent": "archive",
+      "level": "Container",
+      "name": "ffmpeg",
+      "purpose": "Optional command-line tool. The app uses it to move the moov atom of imported videos to the front of the file, so that they play through media://.",
+      "location": [
+        "src/main/media.ts"
+      ],
+      "depends_on": [],
+      "data_in": "Source video path and output path",
+      "data_out": "Remuxed video file",
+      "notes": "Not bundled. The app looks in /opt/homebrew/bin, /usr/local/bin, then PATH. Without it, videos are copied as they are and may not play.",
+      "technology": "ffmpeg binary",
+      "entry_point": "ffmpeg -y -i <src> -c copy -movflags +faststart <tmp>",
+      "start_deploy": "Installed by the user, for example with Homebrew.",
+      "interfaces": [
+        "Command line"
+      ],
+      "configuration": [
+        "None"
+      ],
+      "external": true,
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "infra:media-dir",
+      "parent": "archive",
+      "level": "Container",
+      "name": "Media folder",
+      "purpose": "Holds copies of every image and video the user imports. Database rows refer to these files by file name only.",
+      "location": [
+        "src/main/db.ts",
+        "src/main/media.ts"
+      ],
+      "depends_on": [],
+      "data_in": "Files copied or remuxed by importMedia",
+      "data_out": "File bytes served through the media:// protocol",
+      "notes": "Files are named <uuid><ext>. Files imported into a draft that is never saved stay on disk. A replaced or removed cover image file is not deleted until the post is deleted.",
+      "technology": "Local file system folder",
+      "entry_point": "<userData>/media/",
+      "start_deploy": "Created by getDb on launch.",
+      "interfaces": [
+        "media://<fileName> URLs"
+      ],
+      "configuration": [
+        "None"
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "infra:settings-file",
+      "parent": "archive",
+      "level": "Container",
+      "name": "Settings file (settings.json)",
+      "purpose": "Stores the user name, the quote bank, the goals list, and the theme choice between launches.",
+      "location": [
+        "src/main/settings.ts"
+      ],
+      "depends_on": [],
+      "data_in": "Settings JSON written by writeSettings",
+      "data_out": "Settings JSON read by readSettings",
+      "notes": "A missing or broken file gives the default settings.",
+      "technology": "JSON file",
+      "entry_point": "<userData>/settings.json",
+      "start_deploy": "Created on the first settings save.",
+      "interfaces": [
+        "None"
+      ],
+      "configuration": [
+        "None"
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "infra:sqlite",
+      "parent": "archive",
+      "level": "Container",
+      "name": "SQLite database (blog.db)",
+      "purpose": "Stores all entries, their media rows, categories, the links between them, and the saved revisions of each entry.",
+      "location": [
+        "src/main/db.ts"
+      ],
+      "depends_on": [],
+      "data_in": "SQL statements from src/main/posts.ts and src/main/db.ts",
+      "data_out": "Rows of the post, media, tag, post_tag, and post_revision tables",
+      "notes": "The tag table holds what the UI calls categories. The post.status and post.published_at columns are written but never read. Foreign keys are on, so deleting a post or tag cascades to media, post_tag, and post_revision rows.",
+      "technology": "SQLite through better-sqlite3, WAL journal mode",
+      "entry_point": "<userData>/blog.db, opened by getDb",
+      "start_deploy": "Created on first launch by getDb. Columns added later are added by migrate.",
+      "interfaces": [
+        "Tables: post, media, tag, post_tag, post_revision"
+      ],
+      "configuration": [
+        "None"
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main",
+      "parent": "archive",
+      "level": "Container",
+      "name": "Main process",
+      "purpose": "The Electron main process. It owns the window, the app menu, the database, the media files, and the settings file, and it answers every IPC request from the renderer.",
+      "location": [
+        "src/main/"
+      ],
+      "depends_on": [
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        },
+        {
+          "id": "infra:media-dir",
+          "type": "writes"
+        },
+        {
+          "id": "infra:settings-file",
+          "type": "writes"
+        },
+        {
+          "id": "ext:ffmpeg",
+          "type": "calls"
+        },
+        {
+          "id": "src/shared",
+          "type": "imports"
+        }
+      ],
+      "data_in": "IPC invoke calls from the preload bridge, media:// requests from the renderer, menu clicks",
+      "data_out": "IPC replies with PostDetail, PostSummary, Category, Revision, and Settings objects; media file bytes; menu events",
+      "notes": "The app name is 'Archive', but userData is fixed to appData/field-notes so that a rename does not lose data. The window runs with sandbox: false.",
+      "technology": "TypeScript, Electron 43, Node.js, better-sqlite3 13, @electron-toolkit/utils, built with electron-vite 5",
+      "entry_point": "src/main/index.ts (built to out/main/index.js, the package.json main)",
+      "start_deploy": "Run 'npm run dev' for development. 'npm run package' builds and makes an unsigned macOS app folder in dist/ with electron-builder.",
+      "interfaces": [
+        "IPC: app:getVersion, theme:get, theme:set, settings:get, settings:update",
+        "IPC: posts:list, posts:getBySlug, posts:create, posts:update, posts:updateBrainstorm, posts:delete, posts:listRevisions, posts:getRevision, posts:revertToRevision",
+        "IPC: categories:list, categories:create, categories:rename, categories:delete, categories:reorder, categories:updateDescription, categories:setFavorite, categories:contextMenu",
+        "IPC: media:import",
+        "Events to renderer: menu:new-entry, menu:save, theme:updated",
+        "Custom protocol: media://<fileName>"
+      ],
+      "configuration": [
+        "ELECTRON_RENDERER_URL (dev server URL, set by electron-vite in dev)",
+        "electron.vite.config.ts",
+        "electron-builder.yml",
+        "tsconfig.node.json"
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/db.ts",
+      "parent": "src/main",
+      "level": "File",
+      "name": "db.ts",
+      "purpose": "Opens the single SQLite connection, creates the schema, runs column migrations, and gives the path of the media folder.",
+      "location": [
+        "src/main/db.ts"
+      ],
+      "depends_on": [
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        },
+        {
+          "id": "infra:media-dir",
+          "type": "writes"
+        }
+      ],
+      "data_in": "None",
+      "data_out": "A shared better-sqlite3 Database object, the media folder path",
+      "notes": "The SCHEMA string uses CREATE TABLE IF NOT EXISTS. New columns must also go into migrate, or existing databases will not get them.",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/db.ts::getDb",
+      "parent": "src/main/db.ts",
+      "level": "Function",
+      "name": "getDb",
+      "purpose": "Returns the one open database connection, and opens and prepares it on the first call.",
+      "location": [
+        "src/main/db.ts:95"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::migrate",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        },
+        {
+          "id": "infra:media-dir",
+          "type": "writes"
+        }
+      ],
+      "data_in": "None",
+      "data_out": "Database connection",
+      "notes": "The connection is cached in a module variable and never closed.",
+      "signature": "getDb(): Database.Database",
+      "side_effects": "Creates the media folder; creates or opens blog.db; sets WAL and foreign_keys pragmas; creates tables",
+      "errors_handled": "None (open errors are thrown to the caller)",
+      "key_logic": [
+        "Return the cached connection if it exists.",
+        "Create <userData>/media if it does not exist.",
+        "Open <userData>/blog.db.",
+        "Turn on WAL journal mode and foreign keys.",
+        "Run the SCHEMA statements, then migrate."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/db.ts::getMediaDir",
+      "parent": "src/main/db.ts",
+      "level": "Function",
+      "name": "getMediaDir",
+      "purpose": "Gives the path of the folder that holds imported media files.",
+      "location": [
+        "src/main/db.ts:111"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "Absolute path <userData>/media",
+      "notes": "It does not create the folder. getDb does that.",
+      "signature": "getMediaDir(): string",
+      "side_effects": "None",
+      "errors_handled": "None",
+      "key_logic": [
+        "Get the userData path from Electron.",
+        "Join it with 'media'.",
+        "Return the path."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/db.ts::migrate",
+      "parent": "src/main/db.ts",
+      "level": "Function",
+      "name": "migrate",
+      "purpose": "Adds columns that later versions of the app need to databases made by older versions.",
+      "location": [
+        "src/main/db.ts:65"
+      ],
+      "depends_on": [
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Database connection",
+      "data_out": "None",
+      "notes": "There is no version number. Each step checks PRAGMA table_info for the column.",
+      "signature": "migrate(database: Database.Database): void",
+      "side_effects": "ALTER TABLE on post, post_revision, and tag; one UPDATE of tag.sort_order",
+      "errors_handled": "None",
+      "key_logic": [
+        "Read the columns of the post table.",
+        "Add post.brainstorm and post.cover_image_caption when they are missing.",
+        "Add post_revision.cover_image_caption when it is missing.",
+        "Add tag.sort_order when it is missing, and set it to the tag id.",
+        "Add tag.description and tag.favorite when they are missing."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/index.ts",
+      "parent": "src/main",
+      "level": "File",
+      "name": "index.ts",
+      "purpose": "Main process entry point. It sets the app name and data path, creates the window and menu, serves media:// URLs, and registers every IPC handler.",
+      "location": [
+        "src/main/index.ts"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/settings.ts",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/media.ts::importMedia",
+          "type": "calls"
+        }
+      ],
+      "data_in": "IPC invoke calls, media:// requests, app lifecycle events",
+      "data_out": "IPC replies, HTTP-like responses for media, events to the renderer",
+      "notes": "app.setPath('userData', appData/field-notes) runs before app ready. Changing it would hide all existing data.",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/index.ts::buildMenu",
+      "parent": "src/main/index.ts",
+      "level": "Function",
+      "name": "buildMenu",
+      "purpose": "Sets the application menu, including New Entry (Cmd+N) and Save (Cmd+S), which send events to the renderer.",
+      "location": [
+        "src/main/index.ts:96"
+      ],
+      "depends_on": [
+        {
+          "id": "src/preload/index.ts::api.onMenu",
+          "type": "sends"
+        }
+      ],
+      "data_in": "None",
+      "data_out": "menu:new-entry and menu:save events to the focused window",
+      "notes": "Events go only to the focused window.",
+      "signature": "buildMenu(): void",
+      "side_effects": "Sets the global application menu",
+      "errors_handled": "None",
+      "key_logic": [
+        "Add the app menu on macOS.",
+        "Add File > New Entry, which sends menu:new-entry.",
+        "Add Edit, View, and Window menus with standard roles.",
+        "Add Entry > Save, which sends menu:save.",
+        "Set the menu as the application menu."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/index.ts::createWindow",
+      "parent": "src/main/index.ts",
+      "level": "Function",
+      "name": "createWindow",
+      "purpose": "Creates the main app window with the preload script and loads the renderer.",
+      "location": [
+        "src/main/index.ts:58"
+      ],
+      "depends_on": [
+        {
+          "id": "src/preload/index.ts",
+          "type": "imports"
+        }
+      ],
+      "data_in": "None",
+      "data_out": "BrowserWindow",
+      "notes": "sandbox is false. Links that try to open a new window open in the default browser instead.",
+      "signature": "createWindow(): BrowserWindow",
+      "side_effects": "Opens a window; opens external links with shell.openExternal",
+      "errors_handled": "None",
+      "key_logic": [
+        "Create a 1200x800 window with a hidden inset title bar and a theme-matched background.",
+        "Show the window when it is ready to show.",
+        "Send new-window requests to the external browser and deny them.",
+        "Load ELECTRON_RENDERER_URL in dev, or the built index.html otherwise."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/index.ts::mediaProtocolHandler",
+      "parent": "src/main/index.ts",
+      "level": "Function",
+      "name": "media:// protocol handler",
+      "purpose": "Serves files from the media folder to the renderer, with HTTP range support so that video can seek.",
+      "location": [
+        "src/main/index.ts:212"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getMediaDir",
+          "type": "calls"
+        },
+        {
+          "id": "infra:media-dir",
+          "type": "reads"
+        }
+      ],
+      "data_in": "Request for media://<fileName> with an optional Range header",
+      "data_out": "Response with the file bytes, status 200 or 206, and Content-Type from the file extension",
+      "notes": "An anonymous callback passed to protocol.handle('media'). It reads at most 8 MB per request with synchronous reads. This avoids an Electron race with streamed bodies that corrupts concurrent video range requests.",
+      "signature": "protocol.handle('media', (request) => Response)",
+      "side_effects": "Reads files from disk",
+      "errors_handled": "403 for paths outside the media folder; 404 for a missing file; 416 for a bad or out-of-range Range header",
+      "key_logic": [
+        "Take the file name from the URL host and resolve it inside the media folder.",
+        "Reply 403 when the resolved path leaves the media folder.",
+        "Reply 404 when the file does not exist.",
+        "Parse the Range header, and reply 416 when it is invalid.",
+        "Cap the byte range at 8 MB.",
+        "Read the bytes and reply 206 with Content-Range, or 200 for the full file."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/index.ts::whenReady",
+      "parent": "src/main/index.ts",
+      "level": "Function",
+      "name": "app.whenReady handler",
+      "purpose": "Starts the app when Electron is ready: restores the theme, opens the database, registers the media protocol and all IPC handlers, and opens the window.",
+      "location": [
+        "src/main/index.ts:180"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/settings.ts::getThemeSource",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/settings.ts::setThemeSource",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/settings.ts::getSettings",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/settings.ts::updateSettings",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/index.ts::mediaProtocolHandler",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::listEntries",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::getPostBySlug",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::createPost",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::updatePost",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::updateBrainstorm",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::deletePost",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::listRevisions",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::getRevision",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::revertToRevision",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::listCategoriesWithCounts",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::createCategory",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::renameCategory",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::deleteCategory",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::reorderCategories",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::updateCategoryDescription",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::setCategoryFavorite",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/media.ts::importMedia",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/index.ts::buildMenu",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/index.ts::createWindow",
+          "type": "calls"
+        },
+        {
+          "id": "src/preload/index.ts::api",
+          "type": "sends"
+        }
+      ],
+      "data_in": "IPC invoke calls with their arguments",
+      "data_out": "IPC replies; theme:updated events to every window",
+      "notes": "An anonymous callback passed to app.whenReady().then(). IPC handlers pass arguments straight through without checks. The categories:contextMenu handler shows a native Rename/Delete menu and resolves to the choice or null.",
+      "signature": "app.whenReady().then(() => { ... })",
+      "side_effects": "Sets nativeTheme.themeSource; opens the database; registers the media protocol and IPC handlers; sets the app menu; opens a window",
+      "errors_handled": "None. Errors thrown by handlers go back to the renderer as rejected promises.",
+      "key_logic": [
+        "Set nativeTheme from the saved theme, and send theme:updated to all windows when it changes.",
+        "In dev on macOS, set the dock icon.",
+        "Open the database with getDb.",
+        "Register the media:// protocol handler.",
+        "Register one ipcMain.handle for each app, theme, settings, posts, categories, and media channel.",
+        "Build the menu and create the window.",
+        "On macOS activate, create a window when none is open."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/media.ts",
+      "parent": "src/main",
+      "level": "File",
+      "name": "media.ts",
+      "purpose": "Copies image and video files that the user drops into the app into the media folder under a new UUID name.",
+      "location": [
+        "src/main/media.ts"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getMediaDir",
+          "type": "calls"
+        },
+        {
+          "id": "infra:media-dir",
+          "type": "writes"
+        },
+        {
+          "id": "ext:ffmpeg",
+          "type": "calls"
+        }
+      ],
+      "data_in": "Source file path",
+      "data_out": "ImportedMedia { fileName, type }",
+      "notes": "Supported: .jpg .jpeg .png .gif .webp .heic .avif .mp4 .mov .webm .m4v.",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/media.ts::findFfmpeg",
+      "parent": "src/main/media.ts",
+      "level": "Function",
+      "name": "findFfmpeg",
+      "purpose": "Finds a working ffmpeg binary, because apps started from the macOS GUI do not get the shell PATH.",
+      "location": [
+        "src/main/media.ts:18"
+      ],
+      "depends_on": [
+        {
+          "id": "ext:ffmpeg",
+          "type": "calls"
+        }
+      ],
+      "data_in": "None",
+      "data_out": "Path to ffmpeg, or null",
+      "notes": "The result, including null, is cached for the life of the process. Installing ffmpeg later needs an app restart.",
+      "signature": "findFfmpeg(): string | null",
+      "side_effects": "Runs 'ffmpeg -version' for each candidate",
+      "errors_handled": "Ignores errors from each candidate and tries the next",
+      "key_logic": [
+        "Return the cached result when there is one.",
+        "Try /opt/homebrew/bin/ffmpeg, /usr/local/bin/ffmpeg, then ffmpeg on PATH.",
+        "Skip absolute paths that do not exist.",
+        "Return the first candidate that runs '-version' without error, or null."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/media.ts::importMedia",
+      "parent": "src/main/media.ts",
+      "level": "Function",
+      "name": "importMedia",
+      "purpose": "Imports one dropped file into the media folder and tells the renderer its new name and type.",
+      "location": [
+        "src/main/media.ts:67"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getMediaDir",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/media.ts::importVideo",
+          "type": "calls"
+        },
+        {
+          "id": "infra:media-dir",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Absolute source path from the renderer",
+      "data_out": "{ fileName: '<uuid><ext>', type: 'image' | 'video' }",
+      "notes": "It does not write to the database. The file is linked to a post only when the post is saved.",
+      "signature": "importMedia(sourcePath: string): ImportedMedia",
+      "side_effects": "Writes a file into the media folder",
+      "errors_handled": "Throws 'Unsupported file type' for unknown extensions",
+      "key_logic": [
+        "Find the type from the file extension.",
+        "Throw an error when the type is not image or video.",
+        "Make a new file name from a random UUID and the lower-case extension.",
+        "Remux videos with importVideo, and copy images as they are.",
+        "Return the new file name and the type."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/media.ts::importVideo",
+      "parent": "src/main/media.ts",
+      "level": "Function",
+      "name": "importVideo",
+      "purpose": "Copies a video with its moov atom moved to the front, so that Chromium can play it through media://.",
+      "location": [
+        "src/main/media.ts:47"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/media.ts::findFfmpeg",
+          "type": "calls"
+        },
+        {
+          "id": "ext:ffmpeg",
+          "type": "calls"
+        }
+      ],
+      "data_in": "Source path, destination path",
+      "data_out": "Video file at the destination path",
+      "notes": "See electron/electron#38749. The remux is lossless and does not re-encode. It runs synchronously and blocks the main process during the remux.",
+      "signature": "importVideo(sourcePath: string, destPath: string): void",
+      "side_effects": "Runs ffmpeg; writes a temporary file and renames it",
+      "errors_handled": "When ffmpeg is missing or fails, it falls back to a plain copy",
+      "key_logic": [
+        "Find ffmpeg. When it is missing, copy the file and stop.",
+        "Run ffmpeg with -c copy -movflags +faststart into a temporary file.",
+        "Rename the temporary file to the destination.",
+        "On any error, copy the source file instead."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts",
+      "parent": "src/main",
+      "level": "File",
+      "name": "posts.ts",
+      "purpose": "All database reads and writes for entries, categories, entry media, and revisions. Each exported function backs one IPC channel.",
+      "location": [
+        "src/main/posts.ts"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/db.ts::getMediaDir",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        },
+        {
+          "id": "infra:media-dir",
+          "type": "writes"
+        },
+        {
+          "id": "src/shared/types.ts",
+          "type": "imports"
+        }
+      ],
+      "data_in": "PostInput, ids, slugs, category names",
+      "data_out": "PostSummary, PostDetail, Category, Revision, RevisionDetail",
+      "notes": "Code says 'tag' for the table and 'category' for the concept. Most multi-statement writes are not in a transaction; only reorderCategories uses one. Entry list summaries run one category query per entry.",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::contentChanged",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "contentChanged",
+      "purpose": "Decides if a save or revert changes the content, so that revisions are made only for real changes.",
+      "location": [
+        "src/main/posts.ts:274"
+      ],
+      "depends_on": [],
+      "data_in": "Current and next ContentFields",
+      "data_out": "true or false",
+      "notes": "Media and slug are not compared.",
+      "signature": "contentChanged(current: ContentFields, next: ContentFields): boolean",
+      "side_effects": "None",
+      "errors_handled": "None",
+      "key_logic": [
+        "Compare title, body, and cover image path exactly.",
+        "Compare excerpt, caption, and brainstorm with null treated as empty.",
+        "Compare categories without regard to order.",
+        "Return true when any field differs."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::createCategory",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "createCategory",
+      "purpose": "Adds a category at the end of the sidebar order.",
+      "location": [
+        "src/main/posts.ts:156"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Category name",
+      "data_out": "Category",
+      "notes": "When the name already exists, it returns the existing id with count 0, which can be wrong.",
+      "signature": "createCategory(name: string): Category",
+      "side_effects": "May insert a tag row",
+      "errors_handled": "Duplicate names are ignored by INSERT OR IGNORE",
+      "key_logic": [
+        "Trim the name.",
+        "Find the next sort_order (the highest plus one).",
+        "Insert the tag with a slug, unless the name exists.",
+        "Load the tag id by name and return it."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::createPost",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "createPost",
+      "purpose": "Saves a new entry with its categories and media.",
+      "location": [
+        "src/main/posts.ts:229"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/posts.ts::setPostCategories",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::setPostMedia",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::getPostBySlug",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "PostInput",
+      "data_out": "The new PostDetail",
+      "notes": "status is always 'published'. The three writes are not in one transaction.",
+      "signature": "createPost(input: PostInput): PostDetail",
+      "side_effects": "Inserts into post, tag, post_tag, and media",
+      "errors_handled": "None. A duplicate slug throws a SQLite UNIQUE error, which the editor shows.",
+      "key_logic": [
+        "Insert the post row with status 'published' and the current time.",
+        "Set its categories with setPostCategories.",
+        "Set its media with setPostMedia.",
+        "Load and return the entry by slug."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::deleteCategory",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "deleteCategory",
+      "purpose": "Deletes a category. Its entries stay, but lose the category.",
+      "location": [
+        "src/main/posts.ts:181"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Category id",
+      "data_out": "None",
+      "notes": "post_tag rows are removed by cascade.",
+      "signature": "deleteCategory(id: number): void",
+      "side_effects": "Deletes a tag row and its post_tag rows",
+      "errors_handled": "None",
+      "key_logic": [
+        "Delete the tag by id.",
+        "Let the foreign key cascade remove its post links."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::deletePost",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "deletePost",
+      "purpose": "Deletes an entry and the media files and cover image that belong to it.",
+      "location": [
+        "src/main/posts.ts:486"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getMediaDir",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        },
+        {
+          "id": "infra:media-dir",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Post id",
+      "data_out": "None",
+      "notes": "Files are deleted before the row. Cascades remove media, post_tag, and post_revision rows. Cover images named only in revisions are not deleted.",
+      "signature": "deletePost(id: number): void",
+      "side_effects": "Deletes files from the media folder; deletes the post row and cascaded rows",
+      "errors_handled": "Ignores files that are already gone; does nothing for an unknown id",
+      "key_logic": [
+        "Load the cover image path. Stop when the post does not exist.",
+        "Load the media file names of the post.",
+        "Delete each media file and the cover image file.",
+        "Delete the post row."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::getPostBySlug",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "getPostBySlug",
+      "purpose": "Loads one full entry with its body, brainstorm, categories, and ordered media.",
+      "location": [
+        "src/main/posts.ts:85"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "reads"
+        }
+      ],
+      "data_in": "Slug",
+      "data_out": "PostDetail, or null when no entry has the slug",
+      "notes": "Create, update, and revert also use it to return the saved entry.",
+      "signature": "getPostBySlug(slug: string): PostDetail | null",
+      "side_effects": "Reads post, media, post_tag, and tag",
+      "errors_handled": "Returns null for an unknown slug",
+      "key_logic": [
+        "Select the post row by slug.",
+        "Return null when there is no row.",
+        "Select its media rows in 'order' order.",
+        "Return the summary fields with body, brainstorm, and media."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::getRevision",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "getRevision",
+      "purpose": "Loads the full content of one revision for preview.",
+      "location": [
+        "src/main/posts.ts:357"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "reads"
+        }
+      ],
+      "data_in": "Post id, revision id",
+      "data_out": "RevisionDetail, or null",
+      "notes": "None",
+      "signature": "getRevision(postId: number, revisionId: number): RevisionDetail | null",
+      "side_effects": "Reads post_revision",
+      "errors_handled": "Returns null when the revision does not belong to the post",
+      "key_logic": [
+        "Select the revision by id and post id.",
+        "Return null when there is no row.",
+        "Parse the categories JSON and return the detail."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::listCategoriesWithCounts",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "listCategoriesWithCounts",
+      "purpose": "Lists all categories with their entry counts in sidebar order.",
+      "location": [
+        "src/main/posts.ts:114"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "reads"
+        }
+      ],
+      "data_in": "None",
+      "data_out": "Category[] with id, name, count, description, favorite",
+      "notes": "None",
+      "signature": "listCategoriesWithCounts(): Category[]",
+      "side_effects": "Reads tag and post_tag",
+      "errors_handled": "None",
+      "key_logic": [
+        "Left-join tags to post_tag and count the posts of each tag.",
+        "Sort favorites first, then by sort_order, then by id.",
+        "Convert favorite from 0 or 1 to a boolean."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::listEntries",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "listEntries",
+      "purpose": "Lists entry summaries, newest first, for all entries or for one category.",
+      "location": [
+        "src/main/posts.ts:67"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "reads"
+        }
+      ],
+      "data_in": "Category id, or null for all entries",
+      "data_out": "PostSummary[] with category names",
+      "notes": "Each summary runs a second query for its categories (N+1).",
+      "signature": "listEntries(categoryId: number | null): PostSummary[]",
+      "side_effects": "Reads post, post_tag, and tag",
+      "errors_handled": "None",
+      "key_logic": [
+        "When a category id is given, select posts joined to post_tag for that tag.",
+        "Otherwise select all posts.",
+        "Sort by created_at, newest first.",
+        "Map each row to a summary and load its category names."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::listRevisions",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "listRevisions",
+      "purpose": "Lists the saved revisions of an entry for the History panel.",
+      "location": [
+        "src/main/posts.ts:346"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "reads"
+        }
+      ],
+      "data_in": "Post id",
+      "data_out": "Revision[] (id, createdAt, title), newest first",
+      "notes": "None",
+      "signature": "listRevisions(postId: number): Revision[]",
+      "side_effects": "Reads post_revision",
+      "errors_handled": "None",
+      "key_logic": [
+        "Select the revisions of the post.",
+        "Sort by created_at, newest first.",
+        "Return id, date, and title."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::renameCategory",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "renameCategory",
+      "purpose": "Changes the name and slug of a category.",
+      "location": [
+        "src/main/posts.ts:174"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Category id, new name",
+      "data_out": "None",
+      "notes": "Old revisions keep the old category name.",
+      "signature": "renameCategory(id: number, name: string): void",
+      "side_effects": "Updates a tag row",
+      "errors_handled": "None. A duplicate name throws a SQLite UNIQUE error.",
+      "key_logic": [
+        "Trim the name.",
+        "Update the tag name and its slug."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::reorderCategories",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "reorderCategories",
+      "purpose": "Saves the sidebar order of categories after a drag and drop.",
+      "location": [
+        "src/main/posts.ts:140"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Category ids in the new order",
+      "data_out": "None",
+      "notes": "The only function in this file that uses a transaction.",
+      "signature": "reorderCategories(orderedIds: number[]): void",
+      "side_effects": "Updates tag.sort_order",
+      "errors_handled": "None",
+      "key_logic": [
+        "Start a transaction.",
+        "Set sort_order of each id to its list position.",
+        "Commit."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::revertToRevision",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "revertToRevision",
+      "purpose": "Restores an entry to an earlier revision, and keeps the current content as a new revision so that the revert can be undone.",
+      "location": [
+        "src/main/posts.ts:383"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/posts.ts::contentChanged",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::snapshotRevision",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::setPostCategories",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::getPostBySlug",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Post id, revision id",
+      "data_out": "The reverted PostDetail",
+      "notes": "Media and slug are not restored. Category names that no longer exist are created again.",
+      "signature": "revertToRevision(postId: number, revisionId: number): PostDetail",
+      "side_effects": "May insert into post_revision; updates post; replaces post_tag rows",
+      "errors_handled": "Throws 'Revision not found'",
+      "key_logic": [
+        "Load the revision. Throw an error when it does not exist.",
+        "Compare the current content with the revision.",
+        "When they differ, save the current content as a revision.",
+        "Write the revision content into the post and set updated_at.",
+        "Set the categories from the revision and return the entry."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::setCategoryFavorite",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "setCategoryFavorite",
+      "purpose": "Marks or unmarks a category as a favorite, which moves it to the top of the sidebar.",
+      "location": [
+        "src/main/posts.ts:134"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Category id, favorite flag",
+      "data_out": "None",
+      "notes": "None",
+      "signature": "setCategoryFavorite(id: number, favorite: boolean): void",
+      "side_effects": "Updates tag.favorite",
+      "errors_handled": "None",
+      "key_logic": [
+        "Convert the flag to 1 or 0.",
+        "Update the tag favorite column."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::setPostCategories",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "setPostCategories",
+      "purpose": "Replaces the categories of an entry, and creates any category name that does not exist yet.",
+      "location": [
+        "src/main/posts.ts:185"
+      ],
+      "depends_on": [
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Database, post id, category names",
+      "data_out": "None",
+      "notes": "Categories it creates get sort_order 0, so they sort before older categories.",
+      "signature": "setPostCategories(db: Database.Database, postId: number, categoryNames: string[]): void",
+      "side_effects": "Deletes and inserts post_tag rows; may insert tag rows",
+      "errors_handled": "Skips empty names",
+      "key_logic": [
+        "Delete all post_tag rows of the post.",
+        "For each trimmed, non-empty name, insert the tag if it is new.",
+        "Find the tag id by name.",
+        "Link the post to the tag."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::setPostMedia",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "setPostMedia",
+      "purpose": "Replaces the media list of an entry and deletes files that the entry no longer uses.",
+      "location": [
+        "src/main/posts.ts:201"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getMediaDir",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        },
+        {
+          "id": "infra:media-dir",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Database, post id, MediaInput list",
+      "data_out": "None",
+      "notes": "It deletes files before the new rows are written. A failure after that leaves rows that point to missing files.",
+      "signature": "setPostMedia(db: Database.Database, postId: number, media: PostInput['media']): void",
+      "side_effects": "Deletes files from the media folder; deletes and inserts media rows",
+      "errors_handled": "Ignores files that are already gone",
+      "key_logic": [
+        "Load the current media file names of the post.",
+        "Delete each file that is not in the new list.",
+        "Delete all media rows of the post.",
+        "Insert the new list, with its list position as 'order'."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::snapshotRevision",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "snapshotRevision",
+      "purpose": "Saves a copy of the current content of an entry as a revision in its history.",
+      "location": [
+        "src/main/posts.ts:314"
+      ],
+      "depends_on": [
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Database, post id",
+      "data_out": "None",
+      "notes": "Categories are stored as a JSON array of names, so a renamed category keeps its old name in old revisions.",
+      "signature": "snapshotRevision(db: Database.Database, postId: number): void",
+      "side_effects": "Inserts a post_revision row",
+      "errors_handled": "Does nothing when the post does not exist",
+      "key_logic": [
+        "Load the title, excerpt, body, cover, caption, and brainstorm of the post.",
+        "Stop when the post does not exist.",
+        "Insert them as a revision, with the category names as JSON."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::updateBrainstorm",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "updateBrainstorm",
+      "purpose": "Saves only the brainstorm notes of an entry when the brainstorm panel closes.",
+      "location": [
+        "src/main/posts.ts:482"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Post id, brainstorm text",
+      "data_out": "None",
+      "notes": "It does not change updated_at and does not make a revision.",
+      "signature": "updateBrainstorm(id: number, text: string): void",
+      "side_effects": "Updates post.brainstorm",
+      "errors_handled": "None",
+      "key_logic": [
+        "Update the brainstorm column of the post with the given id."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::updateCategoryDescription",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "updateCategoryDescription",
+      "purpose": "Saves the description text shown at the top of a category list.",
+      "location": [
+        "src/main/posts.ts:128"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/db.ts::getDb",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Category id, description",
+      "data_out": "None",
+      "notes": "An empty description is stored as null.",
+      "signature": "updateCategoryDescription(id: number, description: string): void",
+      "side_effects": "Updates tag.description",
+      "errors_handled": "None",
+      "key_logic": [
+        "Convert an empty string to null.",
+        "Update the tag description."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/posts.ts::updatePost",
+      "parent": "src/main/posts.ts",
+      "level": "Function",
+      "name": "updatePost",
+      "purpose": "Saves changes to an entry, and first keeps a revision of the old content when the content changed.",
+      "location": [
+        "src/main/posts.ts:442"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/posts.ts::contentChanged",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::snapshotRevision",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::setPostCategories",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::setPostMedia",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/posts.ts::getPostBySlug",
+          "type": "calls"
+        },
+        {
+          "id": "infra:sqlite",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Post id, PostInput",
+      "data_out": "The updated PostDetail",
+      "notes": "A media-only change does not make a revision, because revisions do not store media. An old cover image file is not deleted when the cover changes.",
+      "signature": "updatePost(id: number, input: PostInput): PostDetail",
+      "side_effects": "May insert into post_revision; updates post; replaces post_tag and media rows; deletes media files no longer used",
+      "errors_handled": "None. A duplicate slug throws a SQLite UNIQUE error.",
+      "key_logic": [
+        "Load the current content fields and categories.",
+        "When they differ from the input, save a revision of the current content.",
+        "Update the post row, including the slug, and set updated_at to now.",
+        "Replace its categories and media.",
+        "Load and return the entry by its new slug."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/settings.ts",
+      "parent": "src/main",
+      "level": "File",
+      "name": "settings.ts",
+      "purpose": "Reads and writes settings.json, with defaults for the user name, the quote bank, the goals, and the theme.",
+      "location": [
+        "src/main/settings.ts"
+      ],
+      "depends_on": [
+        {
+          "id": "infra:settings-file",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Settings patches",
+      "data_out": "Settings objects",
+      "notes": "Every call reads the file again. There is no cache.",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/settings.ts::getSettings",
+      "parent": "src/main/settings.ts",
+      "level": "Function",
+      "name": "getSettings",
+      "purpose": "Public read of the current settings for the settings:get IPC channel.",
+      "location": [
+        "src/main/settings.ts:51"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/settings.ts::readSettings",
+          "type": "calls"
+        }
+      ],
+      "data_in": "None",
+      "data_out": "Settings",
+      "notes": "None",
+      "signature": "getSettings(): Settings",
+      "side_effects": "Reads settings.json",
+      "errors_handled": "None",
+      "key_logic": [
+        "Call readSettings.",
+        "Return the result."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/settings.ts::getThemeSource",
+      "parent": "src/main/settings.ts",
+      "level": "Function",
+      "name": "getThemeSource",
+      "purpose": "Gives the saved theme choice so that the main process can restore it at startup.",
+      "location": [
+        "src/main/settings.ts:61"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/settings.ts::readSettings",
+          "type": "calls"
+        }
+      ],
+      "data_in": "None",
+      "data_out": "'system' | 'light' | 'dark'",
+      "notes": "None",
+      "signature": "getThemeSource(): ThemeSource",
+      "side_effects": "Reads settings.json",
+      "errors_handled": "None",
+      "key_logic": [
+        "Read the settings.",
+        "Return themeSource."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/settings.ts::readSettings",
+      "parent": "src/main/settings.ts",
+      "level": "Function",
+      "name": "readSettings",
+      "purpose": "Loads settings.json and replaces each bad or missing field with its default.",
+      "location": [
+        "src/main/settings.ts:21"
+      ],
+      "depends_on": [
+        {
+          "id": "infra:settings-file",
+          "type": "reads"
+        }
+      ],
+      "data_in": "None",
+      "data_out": "Settings",
+      "notes": "An old string value of goals becomes a one-item list.",
+      "signature": "readSettings(): Settings",
+      "side_effects": "Reads settings.json",
+      "errors_handled": "A missing file or a JSON parse error gives DEFAULT_SETTINGS",
+      "key_logic": [
+        "Return the defaults when the file does not exist.",
+        "Parse the JSON.",
+        "Keep themeSource only when it is system, light, or dark.",
+        "Keep userName, quotes, and goals only when their types are correct.",
+        "Use the default for every field that fails a check."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/settings.ts::setThemeSource",
+      "parent": "src/main/settings.ts",
+      "level": "Function",
+      "name": "setThemeSource",
+      "purpose": "Saves a new theme choice for the theme:set IPC channel.",
+      "location": [
+        "src/main/settings.ts:65"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/settings.ts::updateSettings",
+          "type": "calls"
+        }
+      ],
+      "data_in": "ThemeSource",
+      "data_out": "None",
+      "notes": "The caller also sets nativeTheme.themeSource. This function only saves it.",
+      "signature": "setThemeSource(themeSource: ThemeSource): void",
+      "side_effects": "Writes settings.json",
+      "errors_handled": "None",
+      "key_logic": [
+        "Call updateSettings with the new themeSource."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/main/settings.ts::updateSettings",
+      "parent": "src/main/settings.ts",
+      "level": "Function",
+      "name": "updateSettings",
+      "purpose": "Merges a partial settings change into the saved settings and writes the file.",
+      "location": [
+        "src/main/settings.ts:55"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/settings.ts::readSettings",
+          "type": "calls"
+        },
+        {
+          "id": "infra:settings-file",
+          "type": "writes"
+        }
+      ],
+      "data_in": "Partial<Settings>",
+      "data_out": "The full new Settings",
+      "notes": "The patch is not checked. The renderer can write any value.",
+      "signature": "updateSettings(patch: Partial<Settings>): Settings",
+      "side_effects": "Writes settings.json",
+      "errors_handled": "None (write errors are thrown)",
+      "key_logic": [
+        "Read the current settings.",
+        "Spread the patch over them.",
+        "Write the result as JSON.",
+        "Return the result."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/preload",
+      "parent": "archive",
+      "level": "Container",
+      "name": "Preload bridge",
+      "purpose": "Exposes a typed window.api object to the renderer. Each method forwards to one IPC channel of the main process.",
+      "location": [
+        "src/preload/"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main",
+          "type": "calls"
+        },
+        {
+          "id": "src/shared",
+          "type": "imports"
+        }
+      ],
+      "data_in": "Calls on window.api from the renderer; events from the main process",
+      "data_out": "IPC invoke messages to the main process; promises and callbacks back to the renderer",
+      "notes": "src/preload/index.d.ts declares the Api type for the renderer. It must be kept in step with index.ts by hand. When context isolation is off, the bridge sets window.api directly.",
+      "technology": "TypeScript, Electron contextBridge and ipcRenderer, @electron-toolkit/preload",
+      "entry_point": "src/preload/index.ts (loaded from out/preload/index.js by createWindow)",
+      "start_deploy": "Built and loaded together with the main process by electron-vite.",
+      "interfaces": [
+        "window.api (posts, categories, media, theme, settings, onMenu, getVersion)",
+        "window.electron (electronAPI from @electron-toolkit/preload)"
+      ],
+      "configuration": [
+        "None"
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/preload/index.ts",
+      "parent": "src/preload",
+      "level": "File",
+      "name": "index.ts",
+      "purpose": "Builds the api object and exposes it, with electronAPI, on window through contextBridge.",
+      "location": [
+        "src/preload/index.ts"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/index.ts::whenReady",
+          "type": "calls"
+        },
+        {
+          "id": "src/shared/types.ts",
+          "type": "imports"
+        }
+      ],
+      "data_in": "None",
+      "data_out": "window.api and window.electron in the renderer",
+      "notes": "When contextBridge throws, the error is only logged to the console.",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/preload/index.ts::api",
+      "parent": "src/preload/index.ts",
+      "level": "Class",
+      "name": "api",
+      "purpose": "The typed object behind window.api. Each method sends one IPC invoke to the main process and returns its promise.",
+      "location": [
+        "src/preload/index.ts:19"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/index.ts::whenReady",
+          "type": "calls"
+        }
+      ],
+      "data_in": "Method calls from the renderer",
+      "data_out": "Promises with the IPC replies",
+      "notes": "An object literal, not a class. media.getPathForFile is local: it calls webUtils.getPathForFile to get the disk path of a dropped File. The method list must match src/preload/index.d.ts by hand.",
+      "signature": "const api = { getVersion, posts: {...}, categories: {...}, media: {...}, onMenu, theme: {...}, settings: {...} }",
+      "side_effects": "IPC messages to the main process; adds event listeners for onMenu and theme.onUpdate",
+      "errors_handled": "None",
+      "key_logic": [
+        "Map each posts method to a posts:* channel.",
+        "Map each categories method to a categories:* channel.",
+        "Map media.import to media:import, and get file paths with webUtils.",
+        "Map theme and settings get/set to their channels.",
+        "Let theme.onUpdate and onMenu add listeners and return a remove function."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/preload/index.ts::api.onMenu",
+      "parent": "src/preload/index.ts::api",
+      "level": "Function",
+      "name": "api.onMenu",
+      "purpose": "Lets the renderer listen for the New Entry and Save menu commands.",
+      "location": [
+        "src/preload/index.ts:59"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/index.ts::buildMenu",
+          "type": "receives"
+        }
+      ],
+      "data_in": "Channel name ('menu:new-entry' or 'menu:save'), callback",
+      "data_out": "A function that removes the listener",
+      "notes": "Only the two menu channels are allowed, so the renderer cannot listen on other IPC channels.",
+      "signature": "onMenu(channel: MenuChannel, callback: () => void): () => void",
+      "side_effects": "Adds an ipcRenderer listener",
+      "errors_handled": "Throws 'Unknown menu channel' for other channels",
+      "key_logic": [
+        "Check that the channel is in MENU_CHANNELS.",
+        "Wrap the callback so that it gets no IPC event.",
+        "Add the listener.",
+        "Return a function that removes it."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer",
+      "parent": "archive",
+      "level": "Container",
+      "name": "Renderer (React UI)",
+      "purpose": "The React user interface in the app window. It shows the sidebar, home page, entry lists, the entry viewer and editor, and the settings page.",
+      "location": [
+        "src/renderer/"
+      ],
+      "depends_on": [
+        {
+          "id": "src/preload",
+          "type": "calls"
+        },
+        {
+          "id": "src/main/index.ts::mediaProtocolHandler",
+          "type": "reads"
+        },
+        {
+          "id": "src/shared",
+          "type": "imports"
+        }
+      ],
+      "data_in": "Data from window.api, menu and theme events, user input, dropped files",
+      "data_out": "IPC calls through window.api, the rendered UI",
+      "notes": "index.html sets a Content-Security-Policy that allows images and video only from 'self', data:, and media:. index.css holds the Tailwind setup and the prose-journal styles for rendered Markdown. The @shared alias exists in the Vite config, but the code imports shared types by relative path.",
+      "technology": "TypeScript, React 18, Tailwind CSS 3, Vite 5, marked 18, DOMPurify 3",
+      "entry_point": "src/renderer/index.html, which loads src/renderer/src/main.tsx",
+      "start_deploy": "Served by the Vite dev server in 'npm run dev'. Built to out/renderer/ and loaded with loadFile in production.",
+      "interfaces": [
+        "None (it is the user interface)"
+      ],
+      "configuration": [
+        "tailwind.config.js",
+        "postcss.config.js",
+        "tsconfig.web.json",
+        "electron.vite.config.ts (aliases @renderer and @shared)"
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/App.tsx",
+      "parent": "src/renderer",
+      "level": "File",
+      "name": "App.tsx",
+      "purpose": "The root component. It holds the app-wide state and chooses which page to show.",
+      "location": [
+        "src/renderer/src/App.tsx"
+      ],
+      "depends_on": [
+        {
+          "id": "src/renderer/src/views",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/components/Sidebar.tsx::Sidebar",
+          "type": "imports"
+        }
+      ],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/App.tsx::App",
+      "parent": "src/renderer/src/App.tsx",
+      "level": "Function",
+      "name": "App",
+      "purpose": "Keeps the categories, route, open entry, theme, and settings, and renders the sidebar with the current page.",
+      "location": [
+        "src/renderer/src/App.tsx:10"
+      ],
+      "depends_on": [
+        {
+          "id": "src/preload/index.ts::api",
+          "type": "calls"
+        },
+        {
+          "id": "src/preload/index.ts::api.onMenu",
+          "type": "receives"
+        },
+        {
+          "id": "src/renderer/src/components/Sidebar.tsx::Sidebar",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/views/HomeView.tsx::HomeView",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/views/SettingsView.tsx::SettingsView",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/views/EntryListView.tsx::EntryListView",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/views/EntryPage.tsx::EntryPage",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/lib/route.ts",
+          "type": "imports"
+        }
+      ],
+      "data_in": "Categories, settings, and theme from window.api; menu:new-entry events; the Escape key",
+      "data_out": "The rendered app; settings and theme changes through window.api",
+      "notes": "There is no URL router. refreshToken is a counter that makes lists reload after a change.",
+      "signature": "App(): JSX.Element",
+      "side_effects": "IPC calls; toggles the 'dark' class on <html>; adds a keydown listener",
+      "errors_handled": "None",
+      "key_logic": [
+        "Load the categories each time refreshToken changes.",
+        "Load the settings and theme, and follow theme updates by toggling the 'dark' class.",
+        "Open a new entry on the menu:new-entry event.",
+        "Close the open entry on Escape and increase refreshToken.",
+        "Show EntryPage when an entry is open.",
+        "Otherwise show HomeView, SettingsView, or EntryListView for the route."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components",
+      "parent": "src/renderer",
+      "level": "Module",
+      "name": "components",
+      "purpose": "Reusable UI pieces: the sidebar, entry cards, the category picker, the file drop zone, and small layout helpers.",
+      "location": [
+        "src/renderer/src/components/"
+      ],
+      "depends_on": [
+        {
+          "id": "src/renderer/src/lib",
+          "type": "calls"
+        },
+        {
+          "id": "src/preload/index.ts::api",
+          "type": "calls"
+        }
+      ],
+      "data_in": "Props",
+      "data_out": "Rendered UI, callbacks",
+      "notes": "Sidebar is the only component that calls window.api.",
+      "boundary": "Owns shared UI. It must not hold page-level state.",
+      "public_interface": [
+        "Sidebar",
+        "EntryCard",
+        "CategoryPicker",
+        "DropZone",
+        "FadeIn",
+        "Divider",
+        "TagList"
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/CategoryPicker.tsx",
+      "parent": "src/renderer/src/components",
+      "level": "File",
+      "name": "CategoryPicker.tsx",
+      "purpose": "Checkbox list for choosing the categories of an entry in the editor.",
+      "location": [
+        "src/renderer/src/components/CategoryPicker.tsx"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/CategoryPicker.tsx::CategoryPicker",
+      "parent": "src/renderer/src/components/CategoryPicker.tsx",
+      "level": "Function",
+      "name": "CategoryPicker",
+      "purpose": "Lets the user check and uncheck existing categories by name.",
+      "location": [
+        "src/renderer/src/components/CategoryPicker.tsx:3"
+      ],
+      "depends_on": [],
+      "data_in": "All categories, selected names, onChange callback",
+      "data_out": "New list of selected names",
+      "notes": "It cannot create categories. The user adds them in the sidebar first.",
+      "signature": "CategoryPicker({ categories, selected, onChange }): JSX.Element",
+      "side_effects": "None",
+      "errors_handled": "None",
+      "key_logic": [
+        "Show a hint when there are no categories.",
+        "Show one checkbox for each category.",
+        "On toggle, add or remove the name and call onChange."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/Divider.tsx",
+      "parent": "src/renderer/src/components",
+      "level": "File",
+      "name": "Divider.tsx",
+      "purpose": "A styled horizontal rule used between sections and list items.",
+      "location": [
+        "src/renderer/src/components/Divider.tsx"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/Divider.tsx::Divider",
+      "parent": "src/renderer/src/components/Divider.tsx",
+      "level": "Function",
+      "name": "Divider",
+      "purpose": "Renders a thin sage-colored <hr> with extra classes.",
+      "location": [
+        "src/renderer/src/components/Divider.tsx:1"
+      ],
+      "depends_on": [],
+      "data_in": "Optional className",
+      "data_out": "<hr> element",
+      "notes": "None",
+      "signature": "Divider({ className }): JSX.Element",
+      "side_effects": "None",
+      "errors_handled": "None",
+      "key_logic": [
+        "Render an <hr> with the border classes and the given className."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/DropZone.tsx",
+      "parent": "src/renderer/src/components",
+      "level": "File",
+      "name": "DropZone.tsx",
+      "purpose": "An area that takes files by drag and drop or by a file picker.",
+      "location": [
+        "src/renderer/src/components/DropZone.tsx"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/DropZone.tsx::DropZone",
+      "parent": "src/renderer/src/components/DropZone.tsx",
+      "level": "Function",
+      "name": "DropZone",
+      "purpose": "Gives dropped or picked files to the editor for import as cover image or media.",
+      "location": [
+        "src/renderer/src/components/DropZone.tsx:3"
+      ],
+      "depends_on": [],
+      "data_in": "onFiles callback, accept filter, multiple flag, children",
+      "data_out": "File[] through onFiles",
+      "notes": "The accept filter applies only to the file picker, not to dropped files.",
+      "signature": "DropZone({ onFiles, multiple, accept, className, children }): JSX.Element",
+      "side_effects": "None",
+      "errors_handled": "None",
+      "key_logic": [
+        "Highlight the area while a file is dragged over it.",
+        "On drop, send the dropped files to onFiles.",
+        "On click, open a hidden file input.",
+        "On pick, send the files to onFiles and clear the input."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/EntryCard.tsx",
+      "parent": "src/renderer/src/components",
+      "level": "File",
+      "name": "EntryCard.tsx",
+      "purpose": "One entry in a list, with cover thumbnail, date, title, excerpt, and categories.",
+      "location": [
+        "src/renderer/src/components/EntryCard.tsx"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/EntryCard.tsx::EntryCard",
+      "parent": "src/renderer/src/components/EntryCard.tsx",
+      "level": "Function",
+      "name": "EntryCard",
+      "purpose": "Renders a clickable summary of one entry that opens it by slug.",
+      "location": [
+        "src/renderer/src/components/EntryCard.tsx:6"
+      ],
+      "depends_on": [
+        {
+          "id": "src/renderer/src/lib/media.ts::mediaUrl",
+          "type": "calls"
+        },
+        {
+          "id": "src/renderer/src/lib/date.ts::formatDate",
+          "type": "calls"
+        },
+        {
+          "id": "src/renderer/src/components/TagList.tsx::TagList",
+          "type": "imports"
+        },
+        {
+          "id": "src/main/index.ts::mediaProtocolHandler",
+          "type": "reads"
+        }
+      ],
+      "data_in": "PostSummary, onOpen callback",
+      "data_out": "onOpen(slug) on click",
+      "notes": "None",
+      "signature": "EntryCard({ entry, onOpen }): JSX.Element",
+      "side_effects": "Loads the cover image through media://",
+      "errors_handled": "None",
+      "key_logic": [
+        "Show the cover image when there is one.",
+        "Show the created date, title, and excerpt.",
+        "Show the categories.",
+        "Call onOpen with the slug on click."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/FadeIn.tsx",
+      "parent": "src/renderer/src/components",
+      "level": "File",
+      "name": "FadeIn.tsx",
+      "purpose": "A wrapper that fades its content in when it scrolls into view.",
+      "location": [
+        "src/renderer/src/components/FadeIn.tsx"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/FadeIn.tsx::FadeIn",
+      "parent": "src/renderer/src/components/FadeIn.tsx",
+      "level": "Function",
+      "name": "FadeIn",
+      "purpose": "Shows its children with a fade and slide once they become visible.",
+      "location": [
+        "src/renderer/src/components/FadeIn.tsx:3"
+      ],
+      "depends_on": [],
+      "data_in": "Children, className",
+      "data_out": "Wrapped children",
+      "notes": "None",
+      "signature": "FadeIn({ children, className }): JSX.Element",
+      "side_effects": "Creates an IntersectionObserver",
+      "errors_handled": "None",
+      "key_logic": [
+        "Observe the wrapper element.",
+        "When 10% of it is visible, set visible and stop observing.",
+        "Change the classes from hidden to visible with a 700 ms transition."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/Sidebar.tsx",
+      "parent": "src/renderer/src/components",
+      "level": "File",
+      "name": "Sidebar.tsx",
+      "purpose": "The left navigation with Home, All, the categories, and Settings.",
+      "location": [
+        "src/renderer/src/components/Sidebar.tsx"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/Sidebar.tsx::Sidebar",
+      "parent": "src/renderer/src/components/Sidebar.tsx",
+      "level": "Function",
+      "name": "Sidebar",
+      "purpose": "Shows the navigation and manages categories: add, rename, delete, favorite, and drag to reorder.",
+      "location": [
+        "src/renderer/src/components/Sidebar.tsx:6"
+      ],
+      "depends_on": [
+        {
+          "id": "src/preload/index.ts::api",
+          "type": "calls"
+        },
+        {
+          "id": "src/renderer/src/lib/journalLine.ts::todaysJournalLine",
+          "type": "calls"
+        },
+        {
+          "id": "src/renderer/src/lib/route.ts",
+          "type": "imports"
+        }
+      ],
+      "data_in": "Categories, current route, selection and change callbacks",
+      "data_out": "categories:create, rename, delete, reorder, setFavorite, and contextMenu calls; route changes",
+      "notes": "Delete uses window.confirm. The order is updated locally before the reorder call returns.",
+      "signature": "Sidebar({ categories, route, onSelectHome, onSelectSettings, onSelectCategory, onCategoriesChanged }): JSX.Element",
+      "side_effects": "IPC calls",
+      "errors_handled": "None",
+      "key_logic": [
+        "Show Archive (home), today's journal line, All, each category, and Settings.",
+        "On drop, find the new index, skip moves that change nothing, and save the new order.",
+        "On right-click, show the native menu, then rename or delete.",
+        "On delete, confirm with the entry count, and go to All if that category was open.",
+        "Toggle favorite with the star button.",
+        "Add a category from the '+ New category' input."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/TagList.tsx",
+      "parent": "src/renderer/src/components",
+      "level": "File",
+      "name": "TagList.tsx",
+      "purpose": "Shows category names of an entry as one dot-separated line.",
+      "location": [
+        "src/renderer/src/components/TagList.tsx"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/components/TagList.tsx::TagList",
+      "parent": "src/renderer/src/components/TagList.tsx",
+      "level": "Function",
+      "name": "TagList",
+      "purpose": "Renders category names joined by ' · ', or nothing when there are none.",
+      "location": [
+        "src/renderer/src/components/TagList.tsx:1"
+      ],
+      "depends_on": [],
+      "data_in": "Category names",
+      "data_out": "<p> element or null",
+      "notes": "None",
+      "signature": "TagList({ tags }: { tags: string[] }): JSX.Element | null",
+      "side_effects": "None",
+      "errors_handled": "None",
+      "key_logic": [
+        "Return null when the list is empty.",
+        "Otherwise render the names joined by ' · '."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib",
+      "parent": "src/renderer",
+      "level": "Module",
+      "name": "lib",
+      "purpose": "Small pure helpers for dates, slugs, Markdown, media URLs, the daily quote and journal line, and the route type.",
+      "location": [
+        "src/renderer/src/lib/"
+      ],
+      "depends_on": [],
+      "data_in": "Plain values",
+      "data_out": "Plain values",
+      "notes": "slugify duplicates slugifyCategory in src/main/posts.ts. quote.ts and journalLine.ts use the same day-of-year logic.",
+      "boundary": "Owns pure functions with no React state and no IPC.",
+      "public_interface": [
+        "formatDate",
+        "formatDateTime",
+        "slugify",
+        "renderMarkdown",
+        "mediaUrl",
+        "quoteOfTheDay",
+        "todaysJournalLine",
+        "Route"
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/date.ts",
+      "parent": "src/renderer/src/lib",
+      "level": "File",
+      "name": "date.ts",
+      "purpose": "Formats database and ISO timestamps as US English dates for display.",
+      "location": [
+        "src/renderer/src/lib/date.ts"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "SQLite datetime('now') has no 'T' and no zone. These functions read it as UTC.",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/date.ts::formatDate",
+      "parent": "src/renderer/src/lib/date.ts",
+      "level": "Function",
+      "name": "formatDate",
+      "purpose": "Formats a timestamp as a date such as 'October 23, 2026'.",
+      "location": [
+        "src/renderer/src/lib/date.ts:1"
+      ],
+      "depends_on": [],
+      "data_in": "ISO or SQLite timestamp string, or null",
+      "data_out": "Formatted date, or an empty string",
+      "notes": "None",
+      "signature": "formatDate(iso: string | null): string",
+      "side_effects": "None",
+      "errors_handled": "Returns '' for null",
+      "key_logic": [
+        "Return '' for null.",
+        "Change a SQLite timestamp to ISO UTC.",
+        "Format it with toLocaleDateString in en-US."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/date.ts::formatDateTime",
+      "parent": "src/renderer/src/lib/date.ts",
+      "level": "Function",
+      "name": "formatDateTime",
+      "purpose": "Formats a timestamp as a date and time for the revision history.",
+      "location": [
+        "src/renderer/src/lib/date.ts:7"
+      ],
+      "depends_on": [],
+      "data_in": "ISO or SQLite timestamp string, or null",
+      "data_out": "Formatted date and time, or an empty string",
+      "notes": "None",
+      "signature": "formatDateTime(iso: string | null): string",
+      "side_effects": "None",
+      "errors_handled": "Returns '' for null",
+      "key_logic": [
+        "Return '' for null.",
+        "Change a SQLite timestamp to ISO UTC.",
+        "Format it with toLocaleString in en-US with hour and minute."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/journalLine.ts",
+      "parent": "src/renderer/src/lib",
+      "level": "File",
+      "name": "journalLine.ts",
+      "purpose": "Holds a fixed list of short field-note phrases and picks one per day for the sidebar.",
+      "location": [
+        "src/renderer/src/lib/journalLine.ts"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/journalLine.ts::todaysJournalLine",
+      "parent": "src/renderer/src/lib/journalLine.ts",
+      "level": "Function",
+      "name": "todaysJournalLine",
+      "purpose": "Gives the phrase of the day shown under the app name in the sidebar.",
+      "location": [
+        "src/renderer/src/lib/journalLine.ts:17"
+      ],
+      "depends_on": [],
+      "data_in": "Date (default now)",
+      "data_out": "One phrase",
+      "notes": "None",
+      "signature": "todaysJournalLine(date?: Date): string",
+      "side_effects": "None",
+      "errors_handled": "None",
+      "key_logic": [
+        "Find the day of the year.",
+        "Return the phrase at day-of-year modulo 12."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/markdown.ts",
+      "parent": "src/renderer/src/lib",
+      "level": "File",
+      "name": "markdown.ts",
+      "purpose": "Converts entry Markdown to safe HTML.",
+      "location": [
+        "src/renderer/src/lib/markdown.ts"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/markdown.ts::renderMarkdown",
+      "parent": "src/renderer/src/lib/markdown.ts",
+      "level": "Function",
+      "name": "renderMarkdown",
+      "purpose": "Parses Markdown with marked and cleans the HTML with DOMPurify before it is inserted into the page.",
+      "location": [
+        "src/renderer/src/lib/markdown.ts:4"
+      ],
+      "depends_on": [],
+      "data_in": "Markdown text",
+      "data_out": "Sanitized HTML string",
+      "notes": "This is the only protection for dangerouslySetInnerHTML in EntryPage.",
+      "signature": "renderMarkdown(source: string): string",
+      "side_effects": "None",
+      "errors_handled": "None",
+      "key_logic": [
+        "Parse the Markdown to HTML synchronously.",
+        "Sanitize the HTML with DOMPurify.",
+        "Return the result."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/media.ts",
+      "parent": "src/renderer/src/lib",
+      "level": "File",
+      "name": "media.ts",
+      "purpose": "Builds media:// URLs for stored media file names.",
+      "location": [
+        "src/renderer/src/lib/media.ts"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/media.ts::mediaUrl",
+      "parent": "src/renderer/src/lib/media.ts",
+      "level": "Function",
+      "name": "mediaUrl",
+      "purpose": "Turns a stored file name into a media:// URL that the main process serves.",
+      "location": [
+        "src/renderer/src/lib/media.ts:1"
+      ],
+      "depends_on": [
+        {
+          "id": "src/main/index.ts::mediaProtocolHandler",
+          "type": "imports"
+        }
+      ],
+      "data_in": "File name",
+      "data_out": "media://<encoded file name>",
+      "notes": "The file name is the URL host. The handler decodes it from url.hostname.",
+      "signature": "mediaUrl(fileName: string): string",
+      "side_effects": "None",
+      "errors_handled": "None",
+      "key_logic": [
+        "URL-encode the file name.",
+        "Prefix it with media://."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/quote.ts",
+      "parent": "src/renderer/src/lib",
+      "level": "File",
+      "name": "quote.ts",
+      "purpose": "Picks the quote of the day from the user's quote bank.",
+      "location": [
+        "src/renderer/src/lib/quote.ts"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/quote.ts::quoteOfTheDay",
+      "parent": "src/renderer/src/lib/quote.ts",
+      "level": "Function",
+      "name": "quoteOfTheDay",
+      "purpose": "Gives the same quote all day, and a different one on the next day.",
+      "location": [
+        "src/renderer/src/lib/quote.ts:3"
+      ],
+      "depends_on": [],
+      "data_in": "Quote list, date (default now)",
+      "data_out": "One quote, or null",
+      "notes": "Adding or removing quotes changes the pick for today.",
+      "signature": "quoteOfTheDay(quotes: string[], date?: Date): string | null",
+      "side_effects": "None",
+      "errors_handled": "Returns null for an empty list",
+      "key_logic": [
+        "Return null when the list is empty.",
+        "Find the day of the year.",
+        "Return the quote at day-of-year modulo the list length."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/route.ts",
+      "parent": "src/renderer/src/lib",
+      "level": "File",
+      "name": "route.ts",
+      "purpose": "Declares the Route type: home, settings, or a category (null means All).",
+      "location": [
+        "src/renderer/src/lib/route.ts"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "Type only.",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/slug.ts",
+      "parent": "src/renderer/src/lib",
+      "level": "File",
+      "name": "slug.ts",
+      "purpose": "Makes URL-safe slugs from entry titles.",
+      "location": [
+        "src/renderer/src/lib/slug.ts"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/lib/slug.ts::slugify",
+      "parent": "src/renderer/src/lib/slug.ts",
+      "level": "Function",
+      "name": "slugify",
+      "purpose": "Turns a title into a lower-case, hyphen-separated slug.",
+      "location": [
+        "src/renderer/src/lib/slug.ts:1"
+      ],
+      "depends_on": [],
+      "data_in": "Text",
+      "data_out": "Slug",
+      "notes": "A title with no ASCII letters or digits gives an empty slug.",
+      "signature": "slugify(input: string): string",
+      "side_effects": "None",
+      "errors_handled": "None",
+      "key_logic": [
+        "Trim and lower-case the text.",
+        "Replace each run of other characters with '-'.",
+        "Remove '-' at the start and end."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/main.tsx",
+      "parent": "src/renderer",
+      "level": "File",
+      "name": "main.tsx",
+      "purpose": "Renderer entry point. It mounts App into #root in StrictMode and loads the global CSS.",
+      "location": [
+        "src/renderer/src/main.tsx"
+      ],
+      "depends_on": [
+        {
+          "id": "src/renderer/src/App.tsx::App",
+          "type": "calls"
+        }
+      ],
+      "data_in": "None",
+      "data_out": "The mounted React tree",
+      "notes": "StrictMode runs effects twice in development.",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/views",
+      "parent": "src/renderer",
+      "level": "Module",
+      "name": "views",
+      "purpose": "The full pages of the app: home, settings, entry list, and the entry viewer and editor.",
+      "location": [
+        "src/renderer/src/views/"
+      ],
+      "depends_on": [
+        {
+          "id": "src/renderer/src/components",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/lib",
+          "type": "calls"
+        },
+        {
+          "id": "src/preload/index.ts::api",
+          "type": "calls"
+        }
+      ],
+      "data_in": "Props from App, data from window.api",
+      "data_out": "Rendered pages, IPC calls",
+      "notes": "None",
+      "boundary": "Owns page state and the IPC calls for a page. Shared UI pieces go in components, and pure helpers go in lib.",
+      "public_interface": [
+        "HomeView",
+        "SettingsView",
+        "EntryListView",
+        "EntryPage"
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/views/EntryListView.tsx",
+      "parent": "src/renderer/src/views",
+      "level": "File",
+      "name": "EntryListView.tsx",
+      "purpose": "The list of entries for All or one category, with an editable category description.",
+      "location": [
+        "src/renderer/src/views/EntryListView.tsx"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/views/EntryListView.tsx::CategoryDescription",
+      "parent": "src/renderer/src/views/EntryListView.tsx",
+      "level": "Function",
+      "name": "CategoryDescription",
+      "purpose": "Shows the category description and lets the user edit it in place.",
+      "location": [
+        "src/renderer/src/views/EntryListView.tsx:7"
+      ],
+      "depends_on": [
+        {
+          "id": "src/preload/index.ts::api",
+          "type": "calls"
+        }
+      ],
+      "data_in": "Category, onChanged callback",
+      "data_out": "categories:updateDescription call",
+      "notes": "None",
+      "signature": "CategoryDescription({ category, onChanged }): JSX.Element",
+      "side_effects": "IPC call",
+      "errors_handled": "None",
+      "key_logic": [
+        "Show the description, or '+ Add description'.",
+        "On click, switch to a textarea.",
+        "Escape cancels; Enter or blur saves.",
+        "Save only when the trimmed text changed, then call onChanged."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/views/EntryListView.tsx::EntryListView",
+      "parent": "src/renderer/src/views/EntryListView.tsx",
+      "level": "Function",
+      "name": "EntryListView",
+      "purpose": "Loads and shows the entry cards of the selected category, newest first.",
+      "location": [
+        "src/renderer/src/views/EntryListView.tsx:66"
+      ],
+      "depends_on": [
+        {
+          "id": "src/preload/index.ts::api",
+          "type": "calls"
+        },
+        {
+          "id": "src/renderer/src/views/EntryListView.tsx::CategoryDescription",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/components/EntryCard.tsx::EntryCard",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/components/FadeIn.tsx::FadeIn",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/components/Divider.tsx::Divider",
+          "type": "imports"
+        }
+      ],
+      "data_in": "Category or null, refreshToken, callbacks",
+      "data_out": "posts:list call; onOpenEntry and onNewEntry callbacks",
+      "notes": "None",
+      "signature": "EntryListView({ category, refreshToken, onOpenEntry, onNewEntry, onCategoriesChanged }): JSX.Element",
+      "side_effects": "IPC call",
+      "errors_handled": "None",
+      "key_logic": [
+        "Load entries with posts:list when the category or refreshToken changes.",
+        "Show the category name, or 'All'.",
+        "Show the category description editor for a real category.",
+        "Show an EntryCard for each entry, with a fade-in.",
+        "Show a '+ New entry' button."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/views/EntryPage.tsx",
+      "parent": "src/renderer/src/views",
+      "level": "File",
+      "name": "EntryPage.tsx",
+      "purpose": "The page for one entry. It has a view mode and an edit mode with Brainstorm and History side panels.",
+      "location": [
+        "src/renderer/src/views/EntryPage.tsx"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "The largest file in the app (about 690 lines). blankDraft and draftFromDetail build the edit Draft.",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/views/EntryPage.tsx::EntryPage",
+      "parent": "src/renderer/src/views/EntryPage.tsx",
+      "level": "Function",
+      "name": "EntryPage",
+      "purpose": "Shows, creates, edits, deletes, and reverts one entry, and imports its cover image and media.",
+      "location": [
+        "src/renderer/src/views/EntryPage.tsx:68"
+      ],
+      "depends_on": [
+        {
+          "id": "src/preload/index.ts::api",
+          "type": "calls"
+        },
+        {
+          "id": "src/preload/index.ts::api.onMenu",
+          "type": "receives"
+        },
+        {
+          "id": "src/main/index.ts::mediaProtocolHandler",
+          "type": "reads"
+        },
+        {
+          "id": "src/renderer/src/lib/slug.ts::slugify",
+          "type": "calls"
+        },
+        {
+          "id": "src/renderer/src/lib/media.ts::mediaUrl",
+          "type": "calls"
+        },
+        {
+          "id": "src/renderer/src/lib/date.ts::formatDate",
+          "type": "calls"
+        },
+        {
+          "id": "src/renderer/src/lib/date.ts::formatDateTime",
+          "type": "calls"
+        },
+        {
+          "id": "src/renderer/src/lib/markdown.ts::renderMarkdown",
+          "type": "calls"
+        },
+        {
+          "id": "src/renderer/src/components/TagList.tsx::TagList",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/components/CategoryPicker.tsx::CategoryPicker",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/components/DropZone.tsx::DropZone",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/components/Divider.tsx::Divider",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/components/FadeIn.tsx::FadeIn",
+          "type": "imports"
+        }
+      ],
+      "data_in": "Entry slug or 'new', categories, current category id; menu:save events",
+      "data_out": "posts:create, posts:update, posts:updateBrainstorm, posts:delete, posts:revertToRevision, and media:import calls; onSaved and onDone callbacks",
+      "notes": "The body is rendered with renderMarkdown into dangerouslySetInnerHTML. Imported files that are not saved stay in the media folder. Delete and revert use window.confirm. New gallery items get negative temporary ids.",
+      "signature": "EntryPage({ entry, categories, currentCategoryId, onDone, onSaved, onFullWidthChange }): JSX.Element",
+      "side_effects": "IPC calls; writes media files through media:import; resizes the body textarea; widens the layout when a side panel is open",
+      "errors_handled": "Shows 'Give it a title first.', import errors, 'Cover image must be an image file', and save errors as a message",
+      "key_logic": [
+        "For 'new', start a blank draft in edit mode, with the current category selected.",
+        "Otherwise load the entry by slug and show it in view mode with rendered Markdown.",
+        "On a dropped file, get its path, call media:import, and add it as cover or media.",
+        "On save, require a title, make a slug from the title when it is empty, then create or update.",
+        "Save the brainstorm text on its own when the Brainstorm panel closes or changes.",
+        "In History, list revisions, preview one, and revert after a confirm.",
+        "Save on menu:save when in edit mode."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/views/HomeView.tsx",
+      "parent": "src/renderer/src/views",
+      "level": "File",
+      "name": "HomeView.tsx",
+      "purpose": "The home page with a greeting, the quote of the day, and the editable goals list.",
+      "location": [
+        "src/renderer/src/views/HomeView.tsx"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/views/HomeView.tsx::HomeView",
+      "parent": "src/renderer/src/views/HomeView.tsx",
+      "level": "Function",
+      "name": "HomeView",
+      "purpose": "Greets the user by name, shows the quote of the day, and lets the user add, edit, and remove goals.",
+      "location": [
+        "src/renderer/src/views/HomeView.tsx:7"
+      ],
+      "depends_on": [
+        {
+          "id": "src/renderer/src/lib/quote.ts::quoteOfTheDay",
+          "type": "calls"
+        },
+        {
+          "id": "src/renderer/src/components/FadeIn.tsx::FadeIn",
+          "type": "imports"
+        },
+        {
+          "id": "src/renderer/src/components/Divider.tsx::Divider",
+          "type": "imports"
+        }
+      ],
+      "data_in": "Settings, onUpdateSettings callback",
+      "data_out": "Goal changes through onUpdateSettings",
+      "notes": "Each goal change saves at once. It does not call window.api itself.",
+      "signature": "HomeView({ settings, onUpdateSettings }): JSX.Element",
+      "side_effects": "None directly (App saves the settings)",
+      "errors_handled": "None",
+      "key_logic": [
+        "Show 'Loading…' until the settings arrive.",
+        "Show 'Hello' with the user name.",
+        "Show today's quote from the quote bank.",
+        "Add, edit, or remove a goal and send the new goals list.",
+        "Remove a goal when its edited text is empty."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/views/SettingsView.tsx",
+      "parent": "src/renderer/src/views",
+      "level": "File",
+      "name": "SettingsView.tsx",
+      "purpose": "The settings page for the user name, the theme, and the quote bank.",
+      "location": [
+        "src/renderer/src/views/SettingsView.tsx"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "None",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/renderer/src/views/SettingsView.tsx::SettingsView",
+      "parent": "src/renderer/src/views/SettingsView.tsx",
+      "level": "Function",
+      "name": "SettingsView",
+      "purpose": "Edits the user name, theme, and quote bank locally, and saves them all with one Save button.",
+      "location": [
+        "src/renderer/src/views/SettingsView.tsx:15"
+      ],
+      "depends_on": [
+        {
+          "id": "src/renderer/src/components/Divider.tsx::Divider",
+          "type": "imports"
+        }
+      ],
+      "data_in": "Settings, current theme, onUpdateSettings and onSetTheme callbacks",
+      "data_out": "Settings patch and theme change through the callbacks",
+      "notes": "Unlike HomeView goals, changes here wait for Save. Leaving the page drops unsaved changes without a warning.",
+      "signature": "SettingsView({ settings, onUpdateSettings, themeSource, onSetTheme }): JSX.Element",
+      "side_effects": "None directly (App saves the settings and theme)",
+      "errors_handled": "None",
+      "key_logic": [
+        "Copy the name, theme, and quotes into local state.",
+        "Mark the page dirty when any value differs from the saved one.",
+        "Add, edit, or remove quotes in local state.",
+        "On Save, send only the changed fields, then the theme if it changed.",
+        "Show 'Saved' for 1.5 seconds."
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/shared",
+      "parent": "archive",
+      "level": "Module",
+      "name": "shared",
+      "purpose": "TypeScript types for the data that goes across IPC between the main process, the preload bridge, and the renderer.",
+      "location": [
+        "src/shared/"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "Types only. It has no runtime code.",
+      "boundary": "Owns the IPC data shapes. It must not contain logic.",
+      "public_interface": [
+        "PostSummary",
+        "PostDetail",
+        "PostInput",
+        "MediaItem",
+        "MediaInput",
+        "ImportedMedia",
+        "Category",
+        "Revision",
+        "RevisionDetail",
+        "Settings",
+        "ThemeSource",
+        "ThemeState"
+      ],
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    },
+    {
+      "id": "src/shared/types.ts",
+      "parent": "src/shared",
+      "level": "File",
+      "name": "types.ts",
+      "purpose": "Declares the entry, media, category, revision, theme, and settings types that every process uses.",
+      "location": [
+        "src/shared/types.ts"
+      ],
+      "depends_on": [],
+      "data_in": "None",
+      "data_out": "None",
+      "notes": "Types use camelCase. The database uses snake_case, and src/main/posts.ts maps between them.",
+      "history": [
+        {
+          "rev": 1,
+          "kind": "added",
+          "note": null
+        }
+      ]
+    }
+  ]
+}

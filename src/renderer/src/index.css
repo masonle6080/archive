@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Matches the Memnon frontend: dark is its charcoal surfaces, ivory text and
+     parchment accent; light is a warm counterpart of the same steps. */
+  :root {
+    --color-paper: 247 245 240;
+
+    --color-line-50: 239 236 229;
+    --color-line-100: 231 227 218;
+    --color-line-200: 220 215 204;
+    --color-line-300: 201 195 182;
+
+    --color-ink-300: 170 164 153;
+    --color-ink-400: 134 130 122;
+    --color-ink-500: 107 103 95;
+    --color-ink-600: 85 81 74;
+    --color-ink-700: 58 55 50;
+    --color-ink-800: 31 29 26;
+    --color-ink-900: 18 17 15;
+
+    --color-accent-400: 179 166 133;
+    --color-accent-500: 133 117 83;
+    --color-accent-600: 107 93 64;
+
+    --color-rose-600: 162 76 70;
+  }
+
+  .dark {
+    --color-paper: 25 25 25;
+
+    --color-line-50: 33 33 33;
+    --color-line-100: 40 40 40;
+    --color-line-200: 54 54 54;
+    --color-line-300: 71 71 71;
+
+    --color-ink-300: 96 93 87;
+    --color-ink-400: 134 130 122;
+    --color-ink-500: 157 152 143;
+    --color-ink-600: 179 174 164;
+    --color-ink-700: 211 206 196;
+    --color-ink-800: 236 232 223;
+    --color-ink-900: 245 242 236;
+
+    --color-accent-400: 168 157 134;
+    --color-accent-500: 219 208 184;
+    --color-accent-600: 201 189 163;
+
+    --color-rose-600: 217 140 132;
+  }
+
+  body {
+    @apply bg-paper text-ink-700 font-sans antialiased;
+  }
+
+  /* macOS "Always show scrollbars" renders Chromium's default gray track
+     even on short pages, reading as a stray UI element — style it to sit
+     quietly instead of matching the OS chrome. */
+  main::-webkit-scrollbar {
+    width: 10px;
+  }
+  main::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  main::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--color-ink-300) / 0.5);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+  main::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--color-ink-400) / 0.7);
+  }
+}
+
+@layer components {
+  .prose-journal {
+    @apply text-ink-700 leading-7;
+  }
+  .prose-journal h1,
+  .prose-journal h2,
+  .prose-journal h3 {
+    @apply font-semibold tracking-tight text-ink-800 mt-8 mb-3;
+  }
+  .prose-journal h1,
+  .prose-journal h2 {
+    @apply font-serif font-medium;
+  }
+  .prose-journal p {
+    @apply mb-5;
+  }
+  .prose-journal a {
+    @apply text-accent-600 underline underline-offset-4 decoration-accent-600/30 hover:decoration-accent-600;
+  }
+  .prose-journal img {
+    @apply rounded-md my-6;
+  }
+  .prose-journal blockquote {
+    @apply border-l-2 border-line-300 pl-4 text-ink-500;
+  }
+  .prose-journal ul,
+  .prose-journal ol {
+    @apply mb-5 pl-5;
+  }
+  .prose-journal ul {
+    @apply list-disc;
+  }
+  .prose-journal ol {
+    @apply list-decimal;
+  }
+  .prose-journal li {
+    @apply mb-1;
+  }
+  .prose-journal code {
+    @apply font-mono text-[0.875em] bg-line-100 px-1 py-0.5 rounded;
+  }
+}

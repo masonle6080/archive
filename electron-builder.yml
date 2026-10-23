@@ -1,0 +1,22 @@
+appId: com.fieldnotes.app
+productName: Archive
+copyright: Copyright © 2026
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - out/**/*
+  - package.json
+  - '!node_modules/**/*.{md,map,ts}'
+
+asarUnpack:
+  - '**/*.node'
+
+mac:
+  target: dir
+  icon: build/icon.icns
+  category: public.app-category.productivity
+  identity: null
+  hardenedRuntime: false
