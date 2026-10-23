@@ -8,50 +8,16 @@ import {
   nativeImage,
   nativeTheme
 } from 'electron'
-import { join, resolve, sep, extname } from 'path'
-import { statSync, openSync, readSync, closeSync } from 'fs'
+import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { getDb, getMediaDir } from './db'
 import { getThemeSource, setThemeSource, getSettings, updateSettings } from './settings'
-import type { ThemeSource, Settings } from '../shared/types'
-import {
-  listEntries,
-  getPostBySlug,
-  listCategoriesWithCounts,
-  createCategory,
-  renameCategory,
-  deleteCategory,
-  reorderCategories,
-  updateCategoryDescription,
-  setCategoryFavorite,
-  createPost,
-  updatePost,
-  updateBrainstorm,
-  deletePost,
-  listRevisions,
-  getRevision,
-  revertToRevision
-} from './posts'
-import { importMedia } from './media'
-import type { PostInput } from '../shared/types'
+import type { ThemeSource, Settings, PostInput } from '../shared/types'
+import { openArchive } from './archive'
+import { findFfmpeg } from './ffmpeg'
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'media', privileges: { secure: true, supportFetchAPI: true, stream: true } }
 ])
-
-const MEDIA_MIME_TYPES: Record<string, string> = {
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.heic': 'image/heic',
-  '.avif': 'image/avif',
-  '.mp4': 'video/mp4',
-  '.mov': 'video/quicktime',
-  '.webm': 'video/webm',
-  '.m4v': 'video/x-m4v'
-}
 
 const iconPath = join(__dirname, '../../build/icon.png')
 
@@ -198,81 +164,16 @@ app.whenReady().then(() => {
     app.dock?.setIcon(nativeImage.createFromPath(iconPath))
   }
 
-  // Initialize the local SQLite database (creates schema + media dir on first run)
-  getDb()
-
-  // Cap how much of a file we read per request. Chromium's media pipeline
-  // issues concurrent/superseding range requests when scrubbing to find a
-  // moov atom at the end of a non-fast-start video, and Electron's
-  // protocol.handle has a cancellation race with long-lived streamed
-  // Response bodies on large files that corrupts those concurrent reads.
-  // Bounded synchronous reads (no live stream to race against) sidestep it.
-  const MEDIA_CHUNK_SIZE = 8 * 1024 * 1024
-
-  protocol.handle('media', (request) => {
-    const url = new URL(request.url)
-    const fileName = decodeURIComponent(url.hostname)
-    const mediaDir = resolve(getMediaDir())
-    const filePath = resolve(mediaDir, fileName)
-
-    if (filePath !== mediaDir && !filePath.startsWith(mediaDir + sep)) {
-      return new Response('Forbidden', { status: 403 })
-    }
-
-    let stat: ReturnType<typeof statSync>
-    try {
-      stat = statSync(filePath)
-    } catch {
-      return new Response('Not found', { status: 404 })
-    }
-
-    const contentType = MEDIA_MIME_TYPES[extname(filePath).toLowerCase()] ?? 'application/octet-stream'
-    const range = request.headers.get('range')
-
-    let start = 0
-    let end = stat.size - 1
-    let partial = false
-
-    if (range) {
-      const match = /^bytes=(\d*)-(\d*)$/.exec(range)
-      if (!match || (!match[1] && !match[2])) {
-        return new Response('Invalid range', { status: 416 })
-      }
-      start = match[1] ? parseInt(match[1], 10) : stat.size - parseInt(match[2], 10)
-      end = match[2] && match[1] ? parseInt(match[2], 10) : stat.size - 1
-      if (start >= stat.size || end >= stat.size || start > end) {
-        return new Response('Range not satisfiable', {
-          status: 416,
-          headers: { 'Content-Range': `bytes */${stat.size}` }
-        })
-      }
-      partial = true
-    }
-
-    if (end - start + 1 > MEDIA_CHUNK_SIZE) {
-      end = start + MEDIA_CHUNK_SIZE - 1
-      partial = true
-    }
-
-    const length = end - start + 1
-    const buffer = Buffer.alloc(length)
-    const fd = openSync(filePath, 'r')
-    try {
-      readSync(fd, buffer, 0, length, start)
-    } finally {
-      closeSync(fd)
-    }
-
-    const headers: Record<string, string> = {
-      'Content-Type': contentType,
-      'Content-Length': String(length),
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'no-store'
-    }
-    if (partial) headers['Content-Range'] = `bytes ${start}-${end}/${stat.size}`
-
-    return new Response(buffer, { status: partial ? 206 : 200, headers })
+  // Open the archive once, in the same data folder as before: the SQLite
+  // database and media files live under userData.
+  const userDataDir = app.getPath('userData')
+  const archive = openArchive({
+    db: join(userDataDir, 'blog.db'),
+    mediaDir: join(userDataDir, 'media'),
+    ffmpegPath: findFfmpeg()
   })
+
+  protocol.handle('media', (request) => archive.media.serve(request))
 
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('theme:get', () => ({
@@ -285,37 +186,37 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:update', (_event, patch: Partial<Settings>) => updateSettings(patch))
-  ipcMain.handle('posts:list', (_event, categoryId: number | null) => listEntries(categoryId))
-  ipcMain.handle('posts:getBySlug', (_event, slug: string) => getPostBySlug(slug))
-  ipcMain.handle('posts:create', (_event, input: PostInput) => createPost(input))
-  ipcMain.handle('posts:update', (_event, id: number, input: PostInput) => updatePost(id, input))
+  ipcMain.handle('posts:list', (_event, categoryId: number | null) => archive.entries.list(categoryId))
+  ipcMain.handle('posts:getBySlug', (_event, slug: string) => archive.entries.getBySlug(slug))
+  ipcMain.handle('posts:create', (_event, input: PostInput) => archive.entries.create(input))
+  ipcMain.handle('posts:update', (_event, id: number, input: PostInput) => archive.entries.update(id, input))
   ipcMain.handle('posts:updateBrainstorm', (_event, id: number, text: string) =>
-    updateBrainstorm(id, text)
+    archive.entries.updateBrainstorm(id, text)
   )
-  ipcMain.handle('posts:delete', (_event, id: number) => deletePost(id))
-  ipcMain.handle('posts:listRevisions', (_event, postId: number) => listRevisions(postId))
+  ipcMain.handle('posts:delete', (_event, id: number) => archive.entries.delete(id))
+  ipcMain.handle('posts:listRevisions', (_event, postId: number) => archive.entries.listRevisions(postId))
   ipcMain.handle('posts:getRevision', (_event, postId: number, revisionId: number) =>
-    getRevision(postId, revisionId)
+    archive.entries.getRevision(postId, revisionId)
   )
   ipcMain.handle('posts:revertToRevision', (_event, postId: number, revisionId: number) =>
-    revertToRevision(postId, revisionId)
+    archive.entries.revertToRevision(postId, revisionId)
   )
-  ipcMain.handle('categories:list', () => listCategoriesWithCounts())
-  ipcMain.handle('categories:create', (_event, name: string) => createCategory(name))
+  ipcMain.handle('categories:list', () => archive.entries.listCategories())
+  ipcMain.handle('categories:create', (_event, name: string) => archive.entries.createCategory(name))
   ipcMain.handle('categories:rename', (_event, id: number, name: string) =>
-    renameCategory(id, name)
+    archive.entries.renameCategory(id, name)
   )
-  ipcMain.handle('categories:delete', (_event, id: number) => deleteCategory(id))
+  ipcMain.handle('categories:delete', (_event, id: number) => archive.entries.deleteCategory(id))
   ipcMain.handle('categories:reorder', (_event, orderedIds: number[]) =>
-    reorderCategories(orderedIds)
+    archive.entries.reorderCategories(orderedIds)
   )
   ipcMain.handle('categories:updateDescription', (_event, id: number, description: string) =>
-    updateCategoryDescription(id, description)
+    archive.entries.updateCategoryDescription(id, description)
   )
   ipcMain.handle('categories:setFavorite', (_event, id: number, favorite: boolean) =>
-    setCategoryFavorite(id, favorite)
+    archive.entries.setCategoryFavorite(id, favorite)
   )
-  ipcMain.handle('media:import', (_event, sourcePath: string) => importMedia(sourcePath))
+  ipcMain.handle('media:import', (_event, sourcePath: string) => archive.media.import(sourcePath))
   ipcMain.handle('categories:contextMenu', (event) => {
     return new Promise<'rename' | 'delete' | null>((resolve) => {
       let resolved = false

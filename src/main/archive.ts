@@ -1,7 +1,7 @@
-import { app } from 'electron'
-import { join } from 'path'
 import { mkdirSync } from 'fs'
 import Database from 'better-sqlite3'
+import { createEntryStore, type EntryStore } from './entry-store'
+import { createMediaLibrary, type MediaLibrary } from './media'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS post (
@@ -60,8 +60,6 @@ CREATE INDEX IF NOT EXISTS idx_post_status_published_at ON post(status, publishe
 CREATE INDEX IF NOT EXISTS idx_post_revision_post_id ON post_revision(post_id, created_at DESC);
 `
 
-let db: Database.Database | null = null
-
 function migrate(database: Database.Database): void {
   const postColumns = database.prepare(`PRAGMA table_info(post)`).all() as { name: string }[]
   if (!postColumns.some((c) => c.name === 'brainstorm')) {
@@ -92,22 +90,34 @@ function migrate(database: Database.Database): void {
   }
 }
 
-export function getDb(): Database.Database {
-  if (db) return db
-
-  const userDataDir = app.getPath('userData')
-  const mediaDir = join(userDataDir, 'media')
-  mkdirSync(mediaDir, { recursive: true })
-
-  db = new Database(join(userDataDir, 'blog.db'))
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
-  db.exec(SCHEMA)
-  migrate(db)
-
-  return db
+export interface ArchiveInputs {
+  /** An open SQLite handle, or a path to open (`:memory:` works). */
+  db: Database.Database | string
+  /** The folder that holds imported media files. Created if missing. */
+  mediaDir: string
+  /** The ffmpeg executable used to remux imported videos, if any. */
+  ffmpegPath?: string | null
 }
 
-export function getMediaDir(): string {
-  return join(app.getPath('userData'), 'media')
+export interface Archive {
+  entries: EntryStore
+  media: MediaLibrary
+  close(): void
+}
+
+// The one seam into the archive: the app and the tests both open it here.
+export function openArchive({ db, mediaDir, ffmpegPath = null }: ArchiveInputs): Archive {
+  mkdirSync(mediaDir, { recursive: true })
+
+  const database = typeof db === 'string' ? new Database(db) : db
+  database.pragma('journal_mode = WAL')
+  database.pragma('foreign_keys = ON')
+  database.exec(SCHEMA)
+  migrate(database)
+
+  return {
+    entries: createEntryStore(database, mediaDir),
+    media: createMediaLibrary(mediaDir, ffmpegPath),
+    close: () => database.close()
+  }
 }
