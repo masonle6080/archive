@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { execFileSync } from 'child_process'
-import { closeSync, copyFileSync, openSync, readSync, renameSync, statSync } from 'fs'
+import { closeSync, copyFileSync, openSync, readSync, renameSync, rmSync, statSync } from 'fs'
 import { extname, join, resolve, sep } from 'path'
 import type { ImportedMedia, MediaType } from '../shared/types'
 
@@ -55,6 +55,7 @@ export function createMediaLibrary(mediaDir: string, ffmpegPath: string | null):
       )
       renameSync(tempPath, destPath)
     } catch {
+      rmSync(tempPath, { force: true })
       copyFileSync(sourcePath, destPath)
     }
   }
@@ -108,7 +109,8 @@ export function createMediaLibrary(mediaDir: string, ffmpegPath: string | null):
       if (!match || (!match[1] && !match[2])) {
         return new Response('Invalid range', { status: 416 })
       }
-      start = match[1] ? parseInt(match[1], 10) : stat.size - parseInt(match[2], 10)
+      // A suffix longer than the file means the whole file (RFC 9110 §14.1.2).
+      start = match[1] ? parseInt(match[1], 10) : Math.max(0, stat.size - parseInt(match[2], 10))
       end = match[2] && match[1] ? parseInt(match[2], 10) : stat.size - 1
       if (start >= stat.size || end >= stat.size || start > end) {
         return new Response('Range not satisfiable', {
