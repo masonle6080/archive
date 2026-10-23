@@ -1,7 +1,17 @@
 import { randomUUID } from 'crypto'
 import { execFileSync } from 'child_process'
-import { closeSync, copyFileSync, openSync, readSync, renameSync, rmSync, statSync } from 'fs'
+import {
+  closeSync,
+  copyFileSync,
+  openSync,
+  readSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync
+} from 'fs'
 import { extname, join, resolve, sep } from 'path'
+import type Database from 'better-sqlite3'
 import type { ImportedMedia, MediaType } from '../shared/types'
 
 export interface MediaLibrary {
@@ -9,6 +19,11 @@ export interface MediaLibrary {
   import(sourcePath: string): ImportedMedia
   /** Answers a `media://<file name>` request from the media folder. */
   serve(request: Request): Response
+  /**
+   * Deletes media files that nothing refers to. Call it only outside a
+   * database transaction: a file delete cannot be rolled back.
+   */
+  sweep(): void
 }
 
 const MEDIA_TYPES: Record<string, { type: MediaType; mime: string }> = {
@@ -33,7 +48,11 @@ const MEDIA_TYPES: Record<string, { type: MediaType; mime: string }> = {
 // Bounded synchronous reads (no live stream to race against) sidestep it.
 const MEDIA_CHUNK_SIZE = 8 * 1024 * 1024
 
-export function createMediaLibrary(mediaDir: string, ffmpegPath: string | null): MediaLibrary {
+export function createMediaLibrary(
+  db: Database.Database,
+  mediaDir: string,
+  ffmpegPath: string | null
+): MediaLibrary {
   // Electron's custom protocol handler (media://) can't satisfy the extra
   // range request Chromium's video pipeline needs to locate a moov atom that
   // trails the file — see electron/electron#38749. Cameras and screen
@@ -146,5 +165,31 @@ export function createMediaLibrary(mediaDir: string, ffmpegPath: string | null):
     return new Response(buffer, { status: partial ? 206 : 200, headers })
   }
 
-  return { import: importMedia, serve }
+  // A file is referenced when an entry's cover image, a gallery media row, or
+  // a revision's cover image names it.
+  function referencedFiles(): Set<string> {
+    const rows = db
+      .prepare(
+        `SELECT cover_image_path AS name FROM post WHERE cover_image_path IS NOT NULL
+         UNION SELECT file_path FROM media
+         UNION SELECT cover_image_path FROM post_revision WHERE cover_image_path IS NOT NULL`
+      )
+      .all() as { name: string }[]
+    return new Set(rows.map((r) => r.name))
+  }
+
+  // Deletes only regular, non-dot files with a supported extension that no
+  // reference names. Subdirectories, dotfiles, and other files stay.
+  function sweep(): void {
+    const referenced = referencedFiles()
+    for (const dirent of readdirSync(mediaDir, { withFileTypes: true })) {
+      const name = dirent.name
+      if (!dirent.isFile() || name.startsWith('.')) continue
+      if (!MEDIA_TYPES[extname(name).toLowerCase()]) continue
+      if (referenced.has(name)) continue
+      rmSync(join(mediaDir, name), { force: true })
+    }
+  }
+
+  return { import: importMedia, serve, sweep }
 }

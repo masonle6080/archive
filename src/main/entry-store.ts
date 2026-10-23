@@ -1,5 +1,3 @@
-import { join } from 'path'
-import { unlinkSync } from 'fs'
 import type Database from 'better-sqlite3'
 import type {
   PostDetail,
@@ -117,9 +115,9 @@ export interface EntryStore {
 
 // The entry store reads and writes entries, categories, and revisions in the
 // given database. Every create, update, revert, and delete runs in one
-// transaction. It still removes dropped gallery media and a deleted entry's
-// files from the media folder, after the transaction commits.
-export function createEntryStore(db: Database.Database, mediaDir: string): EntryStore {
+// transaction. The store never deletes files: after each of those commits it
+// calls `sweep`, which lets the media library free unreferenced files.
+export function createEntryStore(db: Database.Database, sweep: () => void): EntryStore {
   const ENTRY_COLUMNS = `post.id, post.slug, post.created_at, post.updated_at, ${COLUMN_NAMES.map((c) => `post.${c}`).join(', ')}`
 
   function categoriesFor(entryId: number): string[] {
@@ -228,30 +226,12 @@ export function createEntryStore(db: Database.Database, mediaDir: string): Entry
     }
   }
 
-  /** Replaces the gallery media rows. Returns the file names no longer used. */
-  function replaceMedia(entryId: number, media: MediaInput[]): string[] {
-    const existing = db.prepare(`SELECT file_path FROM media WHERE post_id = ?`).all(entryId) as {
-      file_path: string
-    }[]
-    const kept = new Set(media.map((m) => m.filePath))
-
+  function replaceMedia(entryId: number, media: MediaInput[]): void {
     db.prepare(`DELETE FROM media WHERE post_id = ?`).run(entryId)
     const insertMedia = db.prepare(
       `INSERT INTO media (post_id, type, file_path, alt_text, "order") VALUES (?, ?, ?, ?, ?)`
     )
     media.forEach((m, index) => insertMedia.run(entryId, m.type, m.filePath, m.altText, index))
-
-    return existing.map((r) => r.file_path).filter((f) => !kept.has(f))
-  }
-
-  function removeFiles(fileNames: string[]): void {
-    for (const fileName of fileNames) {
-      try {
-        unlinkSync(join(mediaDir, fileName))
-      } catch {
-        // file already gone — nothing to clean up
-      }
-    }
   }
 
   interface ContentWrite {
@@ -265,11 +245,8 @@ export function createEntryStore(db: Database.Database, mediaDir: string): Entry
   }
 
   // The one content-write path for create, update, and revert. Call it inside
-  // a transaction. Returns the entry id and the gallery files it dropped.
-  function writeContent({ entryId, content, slug, media }: ContentWrite): {
-    entryId: number
-    droppedFiles: string[]
-  } {
+  // a transaction. Returns the entry id.
+  function writeContent({ entryId, content, slug, media }: ContentWrite): number {
     let id: number
     if (entryId === null) {
       const result = db
@@ -293,8 +270,8 @@ export function createEntryStore(db: Database.Database, mediaDir: string): Entry
     }
 
     replaceCategories(id, content.categories)
-    const droppedFiles = media ? replaceMedia(id, media) : []
-    return { entryId: id, droppedFiles }
+    if (media) replaceMedia(id, media)
+    return id
   }
 
   function saveEntry(entryId: number | null, input: PostInput): PostDetail {
@@ -306,8 +283,8 @@ export function createEntryStore(db: Database.Database, mediaDir: string): Entry
         media: input.media
       })
     )
-    const { entryId: id, droppedFiles } = write()
-    removeFiles(droppedFiles)
+    const id = write()
+    sweep()
     return getById(id)
   }
 
@@ -319,6 +296,7 @@ export function createEntryStore(db: Database.Database, mediaDir: string): Entry
       // from the target, so a revert can itself be undone.
       writeContent({ entryId, content: contentOf(revision) })
     })()
+    sweep()
     return getById(entryId)
   }
 
@@ -327,22 +305,12 @@ export function createEntryStore(db: Database.Database, mediaDir: string): Entry
   }
 
   function deleteEntry(id: number): void {
-    const remove = db.transaction((): string[] => {
-      const row = db.prepare(`SELECT cover_image_path FROM post WHERE id = ?`).get(id) as
-        | { cover_image_path: string | null }
-        | undefined
-      if (!row) return []
-
-      const files = (
-        db.prepare(`SELECT file_path FROM media WHERE post_id = ?`).all(id) as { file_path: string }[]
-      ).map((m) => m.file_path)
-      if (row.cover_image_path) files.push(row.cover_image_path)
-
-      // ON DELETE CASCADE removes the media, post_tag, and revision rows.
+    // ON DELETE CASCADE removes the media, post_tag, and revision rows, so
+    // the sweep frees every file only this entry and its revisions used.
+    db.transaction(() => {
       db.prepare(`DELETE FROM post WHERE id = ?`).run(id)
-      return files
-    })
-    removeFiles(remove())
+    })()
+    sweep()
   }
 
   function listRevisions(entryId: number): Revision[] {

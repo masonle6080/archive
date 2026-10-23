@@ -115,9 +115,14 @@ export function openArchive({ db, mediaDir, ffmpegPath = null }: ArchiveInputs):
   database.exec(SCHEMA)
   migrate(database)
 
+  const media = createMediaLibrary(database, mediaDir, ffmpegPath)
+  // Free imports from drafts that were never saved, and files that earlier
+  // versions leaked. This permanently deletes them, by design.
+  media.sweep()
+
   return {
-    entries: createEntryStore(database, mediaDir),
-    media: createMediaLibrary(mediaDir, ffmpegPath),
+    entries: createEntryStore(database, media.sweep),
+    media,
     close: () => database.close()
   }
 }
