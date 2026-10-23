@@ -27,6 +27,10 @@ const CONTENT_COLUMNS = {
 type ColumnField = keyof typeof CONTENT_COLUMNS
 const COLUMN_FIELDS = Object.keys(CONTENT_COLUMNS) as ColumnField[]
 const COLUMN_NAMES = COLUMN_FIELDS.map((f) => CONTENT_COLUMNS[f])
+/** The content columns, comma-separated, for SELECT and INSERT lists. */
+const COLUMN_LIST = COLUMN_NAMES.join(', ')
+/** One `?` placeholder per content column, for INSERT values. */
+const COLUMN_PLACEHOLDERS = COLUMN_NAMES.map(() => '?').join(', ')
 
 // Fields where empty and missing count as equal for change detection.
 const BLANK_EQUALS_MISSING: ReadonlySet<ColumnField> = new Set([
@@ -40,10 +44,15 @@ type Content = Pick<PostInput, ColumnField | 'categories'>
 
 type ContentRow = Record<(typeof COLUMN_NAMES)[number], string | null>
 
-function contentFromRow(row: ContentRow, categories: string[]): Content {
+/** Builds a content value from a reader that returns each column field. */
+function buildContent(read: (field: ColumnField) => string | null, categories: string[]): Content {
   const content = { categories } as Record<string, unknown>
-  for (const field of COLUMN_FIELDS) content[field] = row[CONTENT_COLUMNS[field]]
+  for (const field of COLUMN_FIELDS) content[field] = read(field)
   return content as Content
+}
+
+function contentFromRow(row: ContentRow, categories: string[]): Content {
+  return buildContent((field) => row[CONTENT_COLUMNS[field]], categories)
 }
 
 function contentValues(content: Content): (string | null)[] {
@@ -52,9 +61,7 @@ function contentValues(content: Content): (string | null)[] {
 
 /** Picks just the content fields out of a larger shape, such as an input. */
 function contentOf(source: Content): Content {
-  const content = { categories: source.categories } as Record<string, unknown>
-  for (const field of COLUMN_FIELDS) content[field] = source[field]
-  return content as Content
+  return buildContent((field) => source[field], source.categories)
 }
 
 function sameCategories(a: string[], b: string[]): boolean {
@@ -116,7 +123,8 @@ export interface EntryStore {
 // The entry store reads and writes entries, categories, and revisions in the
 // given database. Every create, update, revert, and delete runs in one
 // transaction. The store never deletes files: after each of those commits it
-// calls `sweep`, which lets the media library free unreferenced files.
+// calls `sweep`, which lets the media library free unreferenced files. A sweep
+// failure is logged and never fails the committed write.
 export function createEntryStore(db: Database.Database, sweep: () => void): EntryStore {
   const ENTRY_COLUMNS = `post.id, post.slug, post.created_at, post.updated_at, ${COLUMN_NAMES.map((c) => `post.${c}`).join(', ')}`
 
@@ -148,7 +156,7 @@ export function createEntryStore(db: Database.Database, sweep: () => void): Entr
     return summary
   }
 
-  function listEntries(categoryId: number | null): PostSummary[] {
+  function list(categoryId: number | null): PostSummary[] {
     const rows = categoryId
       ? (db
           .prepare(
@@ -197,7 +205,7 @@ export function createEntryStore(db: Database.Database, sweep: () => void): Entr
   }
 
   function readContent(entryId: number): Content | null {
-    const row = db.prepare(`SELECT ${COLUMN_NAMES.join(', ')} FROM post WHERE id = ?`).get(entryId) as
+    const row = db.prepare(`SELECT ${COLUMN_LIST} FROM post WHERE id = ?`).get(entryId) as
       | ContentRow
       | undefined
     return row ? contentFromRow(row, categoriesFor(entryId)) : null
@@ -205,8 +213,8 @@ export function createEntryStore(db: Database.Database, sweep: () => void): Entr
 
   function snapshotRevision(entryId: number, content: Content): void {
     db.prepare(
-      `INSERT INTO post_revision (post_id, ${COLUMN_NAMES.join(', ')}, categories)
-       VALUES (?, ${COLUMN_NAMES.map(() => '?').join(', ')}, ?)`
+      `INSERT INTO post_revision (post_id, ${COLUMN_LIST}, categories)
+       VALUES (?, ${COLUMN_PLACEHOLDERS}, ?)`
     ).run(entryId, ...contentValues(content), JSON.stringify(content.categories))
   }
 
@@ -234,27 +242,33 @@ export function createEntryStore(db: Database.Database, sweep: () => void): Entr
     media.forEach((m, index) => insertMedia.run(entryId, m.type, m.filePath, m.altText, index))
   }
 
+  /** The fields a save sets that a revision does not capture. */
+  interface EntryFields {
+    slug: string
+    /** The gallery media, in order. */
+    media: MediaInput[]
+  }
+
   interface ContentWrite {
     /** The entry to write, or null to create one. */
     entryId: number | null
     content: Content
-    /** The new slug. Omit to keep the current one (revert). */
-    slug?: string
-    /** The new gallery media. Omit to keep the current rows (revert). */
-    media?: MediaInput[]
+    /** The new slug and gallery media. Omit to keep the current ones (revert). */
+    entryFields?: EntryFields
   }
 
   // The one content-write path for create, update, and revert. Call it inside
   // a transaction. Returns the entry id.
-  function writeContent({ entryId, content, slug, media }: ContentWrite): number {
+  function writeContent({ entryId, content, entryFields }: ContentWrite): number {
     let id: number
     if (entryId === null) {
+      if (!entryFields) throw new Error('A new entry needs a slug and media')
       const result = db
         .prepare(
-          `INSERT INTO post (slug, ${COLUMN_NAMES.join(', ')}, status, published_at, updated_at)
-           VALUES (?, ${COLUMN_NAMES.map(() => '?').join(', ')}, 'published', ?, datetime('now'))`
+          `INSERT INTO post (slug, ${COLUMN_LIST}, status, published_at, updated_at)
+           VALUES (?, ${COLUMN_PLACEHOLDERS}, 'published', ?, datetime('now'))`
         )
-        .run(slug, ...contentValues(content), new Date().toISOString())
+        .run(entryFields.slug, ...contentValues(content), new Date().toISOString())
       id = Number(result.lastInsertRowid)
     } else {
       const current = readContent(entryId)
@@ -262,16 +276,26 @@ export function createEntryStore(db: Database.Database, sweep: () => void): Entr
       if (contentChanged(current, content)) snapshotRevision(entryId, current)
 
       const assignments = COLUMN_NAMES.map((c) => `${c} = ?`)
-      if (slug !== undefined) assignments.unshift('slug = ?')
+      if (entryFields) assignments.unshift('slug = ?')
       db.prepare(
         `UPDATE post SET ${assignments.join(', ')}, updated_at = datetime('now') WHERE id = ?`
-      ).run(...(slug !== undefined ? [slug] : []), ...contentValues(content), entryId)
+      ).run(...(entryFields ? [entryFields.slug] : []), ...contentValues(content), entryId)
       id = entryId
     }
 
     replaceCategories(id, content.categories)
-    if (media) replaceMedia(id, media)
+    if (entryFields) replaceMedia(id, entryFields.media)
     return id
+  }
+
+  // Runs the sweep after a committed write. The write has already succeeded,
+  // so a sweep failure only leaves unreferenced files for the next sweep.
+  function sweepAfterCommit(): void {
+    try {
+      sweep()
+    } catch (error) {
+      console.error('Media sweep failed after a committed write:', error)
+    }
   }
 
   function saveEntry(entryId: number | null, input: PostInput): PostDetail {
@@ -279,24 +303,35 @@ export function createEntryStore(db: Database.Database, sweep: () => void): Entr
       writeContent({
         entryId,
         content: contentOf(input),
-        slug: slugify(input.slug),
-        media: input.media
+        entryFields: { slug: input.slug, media: input.media }
       })
     )
     const id = write()
-    sweep()
+    sweepAfterCommit()
     return getById(id)
+  }
+
+  function create(input: PostInput): PostDetail {
+    return saveEntry(null, input)
+  }
+
+  function update(id: number, input: PostInput): PostDetail {
+    // An update on a missing entry writes nothing and, as before the entry
+    // store existed, returns the entry at the input slug (null if none).
+    const exists = db.prepare(`SELECT 1 FROM post WHERE id = ?`).get(id)
+    if (!exists) return getBySlug(input.slug) as PostDetail
+    return saveEntry(id, input)
   }
 
   function revertToRevision(entryId: number, revisionId: number): PostDetail {
     db.transaction(() => {
-      const revision = readRevision(entryId, revisionId)
+      const revision = getRevision(entryId, revisionId)
       if (!revision) throw new Error('Revision not found')
       // writeContent snapshots the pre-revert content only when it differs
       // from the target, so a revert can itself be undone.
       writeContent({ entryId, content: contentOf(revision) })
     })()
-    sweep()
+    sweepAfterCommit()
     return getById(entryId)
   }
 
@@ -310,7 +345,7 @@ export function createEntryStore(db: Database.Database, sweep: () => void): Entr
     db.transaction(() => {
       db.prepare(`DELETE FROM post WHERE id = ?`).run(id)
     })()
-    sweep()
+    sweepAfterCommit()
   }
 
   function listRevisions(entryId: number): Revision[] {
@@ -324,10 +359,10 @@ export function createEntryStore(db: Database.Database, sweep: () => void): Entr
       .all(entryId) as Revision[]
   }
 
-  function readRevision(entryId: number, revisionId: number): RevisionDetail | null {
+  function getRevision(entryId: number, revisionId: number): RevisionDetail | null {
     const row = db
       .prepare(
-        `SELECT id, created_at, ${COLUMN_NAMES.join(', ')}, categories
+        `SELECT id, created_at, ${COLUMN_LIST}, categories
          FROM post_revision WHERE id = ? AND post_id = ?`
       )
       .get(revisionId, entryId) as RevisionRow | undefined
@@ -339,7 +374,7 @@ export function createEntryStore(db: Database.Database, sweep: () => void): Entr
     }
   }
 
-  function listCategoriesWithCounts(): Category[] {
+  function listCategories(): Category[] {
     const rows = db
       .prepare(
         `SELECT tag.id AS id, tag.name AS name, tag.description AS description, tag.favorite AS favorite,
@@ -395,16 +430,17 @@ export function createEntryStore(db: Database.Database, sweep: () => void): Entr
   }
 
   return {
-    list: listEntries,
+    list,
     getBySlug,
-    create: (input) => saveEntry(null, input),
-    update: (id, input) => saveEntry(id, input),
+    create,
+    update,
     updateBrainstorm,
+    // `delete` is a reserved word, so the function cannot share its name.
     delete: deleteEntry,
     listRevisions,
-    getRevision: readRevision,
+    getRevision,
     revertToRevision,
-    listCategories: listCategoriesWithCounts,
+    listCategories,
     createCategory,
     renameCategory,
     deleteCategory,

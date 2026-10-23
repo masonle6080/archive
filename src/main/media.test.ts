@@ -1,9 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'child_process'
-import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, readFileSync, readdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { openArchive, type Archive } from './archive'
+import { useArchiveFixture } from './archive-fixture'
 import { findFfmpeg } from './ffmpeg'
 
 const ffmpegPath = findFfmpeg()
@@ -26,23 +25,10 @@ function topLevelBoxes(file: Buffer): string[] {
   return types
 }
 
-let workDir: string
-let mediaDir: string
-let archive: Archive
-
-beforeEach(() => {
-  workDir = mkdtempSync(join(tmpdir(), 'media-test-'))
-  mediaDir = join(workDir, 'media')
-  archive = openArchive({ db: ':memory:', mediaDir })
-})
-
-afterEach(() => {
-  archive.close()
-  rmSync(workDir, { recursive: true, force: true })
-})
+const fx = useArchiveFixture()
 
 function sourceFile(name: string, content: string | Buffer): string {
-  const path = join(workDir, name)
+  const path = join(fx.workDir, name)
   writeFileSync(path, content)
   return path
 }
@@ -51,34 +37,34 @@ describe('media library import', () => {
   it('rejects an unsupported extension with a clear error', () => {
     const source = sourceFile('notes.txt', 'hello')
 
-    expect(() => archive.media.import(source)).toThrow('Unsupported file type: .txt')
-    expect(readdirSync(mediaDir)).toEqual([])
+    expect(() => fx.archive.media.import(source)).toThrow('Unsupported file type: .txt')
+    expect(readdirSync(fx.mediaDir)).toEqual([])
   })
 
   it('copies an image into the media folder under a UUID name with a lowercase extension', () => {
     const source = sourceFile('Holiday.JPG', 'jpeg bytes')
 
-    const imported = archive.media.import(source)
+    const imported = fx.archive.media.import(source)
 
     expect(imported.type).toBe('image')
     expect(imported.fileName).toMatch(UUID_NAME('.jpg'))
-    expect(readdirSync(mediaDir)).toEqual([imported.fileName])
-    expect(readFileSync(join(mediaDir, imported.fileName), 'utf8')).toBe('jpeg bytes')
+    expect(readdirSync(fx.mediaDir)).toEqual([imported.fileName])
+    expect(readFileSync(join(fx.mediaDir, imported.fileName), 'utf8')).toBe('jpeg bytes')
   })
 
   it('copies a video unchanged when no ffmpeg is given', () => {
     const source = sourceFile('clip.MOV', 'not really a movie')
 
-    const imported = archive.media.import(source)
+    const imported = fx.archive.media.import(source)
 
     expect(imported.type).toBe('video')
     expect(imported.fileName).toMatch(UUID_NAME('.mov'))
-    expect(readdirSync(mediaDir)).toEqual([imported.fileName])
-    expect(readFileSync(join(mediaDir, imported.fileName), 'utf8')).toBe('not really a movie')
+    expect(readdirSync(fx.mediaDir)).toEqual([imported.fileName])
+    expect(readFileSync(join(fx.mediaDir, imported.fileName), 'utf8')).toBe('not really a movie')
   })
 
   it.skipIf(!ffmpegPath)('remuxes a video so the moov atom comes before the media data', () => {
-    const source = join(workDir, 'clip.mp4')
+    const source = join(fx.workDir, 'clip.mp4')
     execFileSync(
       ffmpegPath!,
       ['-f', 'lavfi', '-i', 'testsrc=duration=1:size=64x64:rate=10', '-pix_fmt', 'yuv420p', source],
@@ -87,42 +73,39 @@ describe('media library import', () => {
     expect(topLevelBoxes(readFileSync(source)).indexOf('moov')).toBeGreaterThan(
       topLevelBoxes(readFileSync(source)).indexOf('mdat')
     )
-    archive.close()
-    archive = openArchive({ db: ':memory:', mediaDir, ffmpegPath })
+    fx.reopen({ ffmpegPath })
 
-    const imported = archive.media.import(source)
+    const imported = fx.archive.media.import(source)
 
-    const boxes = topLevelBoxes(readFileSync(join(mediaDir, imported.fileName)))
+    const boxes = topLevelBoxes(readFileSync(join(fx.mediaDir, imported.fileName)))
     expect(imported.type).toBe('video')
     expect(imported.fileName).toMatch(UUID_NAME('.mp4'))
     expect(boxes.indexOf('moov')).toBeGreaterThanOrEqual(0)
     expect(boxes.indexOf('moov')).toBeLessThan(boxes.indexOf('mdat'))
-    expect(readdirSync(mediaDir)).toEqual([imported.fileName])
+    expect(readdirSync(fx.mediaDir)).toEqual([imported.fileName])
   })
 
   it('copies a video unchanged when the ffmpeg remux fails', () => {
-    archive.close()
-    archive = openArchive({ db: ':memory:', mediaDir, ffmpegPath: join(workDir, 'no-ffmpeg') })
+    fx.reopen({ ffmpegPath: join(fx.workDir, 'no-ffmpeg') })
     const source = sourceFile('clip.mp4', 'not really a movie')
 
-    const imported = archive.media.import(source)
+    const imported = fx.archive.media.import(source)
 
-    expect(readdirSync(mediaDir)).toEqual([imported.fileName])
-    expect(readFileSync(join(mediaDir, imported.fileName), 'utf8')).toBe('not really a movie')
+    expect(readdirSync(fx.mediaDir)).toEqual([imported.fileName])
+    expect(readFileSync(join(fx.mediaDir, imported.fileName), 'utf8')).toBe('not really a movie')
   })
 
   it('leaves no partial remux output behind when ffmpeg fails midway', () => {
     // A stand-in ffmpeg that writes its output file (the last argument), then fails.
     const fakeFfmpeg = sourceFile('fake-ffmpeg', '#!/bin/sh\nfor last; do :; done\necho partial > "$last"\nexit 1\n')
     chmodSync(fakeFfmpeg, 0o755)
-    archive.close()
-    archive = openArchive({ db: ':memory:', mediaDir, ffmpegPath: fakeFfmpeg })
+    fx.reopen({ ffmpegPath: fakeFfmpeg })
     const source = sourceFile('clip.mp4', 'not really a movie')
 
-    const imported = archive.media.import(source)
+    const imported = fx.archive.media.import(source)
 
-    expect(readdirSync(mediaDir)).toEqual([imported.fileName])
-    expect(readFileSync(join(mediaDir, imported.fileName), 'utf8')).toBe('not really a movie')
+    expect(readdirSync(fx.mediaDir)).toEqual([imported.fileName])
+    expect(readFileSync(join(fx.mediaDir, imported.fileName), 'utf8')).toBe('not really a movie')
   })
 })
 
@@ -130,12 +113,12 @@ describe('media library serve', () => {
   const MiB = 1024 * 1024
 
   function importBytes(name: string, content: string | Buffer): string {
-    return archive.media.import(sourceFile(name, content)).fileName
+    return fx.archive.media.import(sourceFile(name, content)).fileName
   }
 
   function get(fileName: string, range?: string): Response {
     const headers: Record<string, string> = range ? { Range: range } : {}
-    return archive.media.serve(new Request(`media://${encodeURIComponent(fileName)}`, { headers }))
+    return fx.archive.media.serve(new Request(`media://${encodeURIComponent(fileName)}`, { headers }))
   }
 
   it('returns 200 with the full content of a small file', async () => {
@@ -209,9 +192,9 @@ describe('media library serve', () => {
   })
 
   it('returns 403 for an encoded path traversal', async () => {
-    writeFileSync(join(workDir, 'secret.png'), 'outside the media folder')
+    writeFileSync(join(fx.workDir, 'secret.png'), 'outside the media folder')
 
-    const response = archive.media.serve(new Request('media://..%2Fsecret.png'))
+    const response = fx.archive.media.serve(new Request('media://..%2Fsecret.png'))
 
     expect(response.status).toBe(403)
     expect(await response.text()).not.toContain('outside the media folder')
