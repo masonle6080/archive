@@ -41,7 +41,7 @@ function CategoryDescription({
         }}
         placeholder="What goes here…"
         rows={2}
-        className="w-full text-sm text-bark-600 bg-transparent outline-none border-b border-sage-200 placeholder:text-bark-300 mb-8 resize-none"
+        className="w-full text-sm text-ink-600 bg-transparent outline-none border-b border-line-200 placeholder:text-ink-300 mb-8 resize-none"
       />
     )
   }
@@ -49,14 +49,14 @@ function CategoryDescription({
   return category.description ? (
     <p
       onClick={() => setEditing(true)}
-      className="text-sm text-bark-500 mb-8 cursor-text hover:text-bark-700 transition-colors"
+      className="text-sm text-ink-500 mb-8 cursor-text hover:text-ink-700 transition-colors"
     >
       {category.description}
     </p>
   ) : (
     <button
       onClick={() => setEditing(true)}
-      className="text-sm text-bark-400 hover:text-terracotta-600 mb-8 transition-colors"
+      className="text-sm text-ink-400 hover:text-accent-600 mb-8 transition-colors"
     >
       + Add description
     </button>
@@ -85,15 +85,15 @@ export function EntryListView({
 
   return (
     <div>
-      <h2 className="font-serif text-2xl text-bark-800 mb-2">{category?.name ?? 'All'}</h2>
+      <h2 className="font-serif font-medium text-2xl text-ink-800 mb-2">{category?.name ?? 'All'}</h2>
 
       {category && <CategoryDescription category={category} onChanged={onCategoriesChanged} />}
       {!category && <div className="mb-8" />}
 
-      {entries === null && <p className="text-sm text-bark-400">Loading…</p>}
+      {entries === null && <p className="text-sm text-ink-400">Loading…</p>}
 
       {entries?.length === 0 && (
-        <p className="text-sm text-bark-500 mb-8">Nothing here yet.</p>
+        <p className="text-sm text-ink-500 mb-8">Nothing here yet.</p>
       )}
 
       <div className="flex flex-col gap-8 mb-8">
@@ -107,7 +107,7 @@ export function EntryListView({
 
       <button
         onClick={onNewEntry}
-        className="text-sm text-terracotta-600 hover:text-terracotta-500 transition-colors"
+        className="inline-flex items-center h-8 px-3 rounded-lg text-sm font-medium bg-accent-600 text-paper hover:bg-accent-500 transition-colors"
       >
         + New entry
       </button>

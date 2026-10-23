@@ -17,7 +17,10 @@ import type { ImportedMedia, MediaType } from '../shared/types'
 export interface MediaLibrary {
   /** Copies a file into the media folder under a new name. */
   import(sourcePath: string): ImportedMedia
-  /** Answers a `media://<file name>` request from the media folder. */
+  /**
+   * Answers a request for `media://<file name>` from the media folder. The
+   * media server forwards each loopback HTTP request here.
+   */
   serve(request: Request): Response
   /**
    * Deletes media files that nothing refers to. Call it only outside a
@@ -40,12 +43,10 @@ const MEDIA_TYPES: Record<string, { type: MediaType; mime: string }> = {
   '.m4v': { type: 'video', mime: 'video/x-m4v' }
 }
 
-// Cap how much of a file we read per request. Chromium's media pipeline
-// issues concurrent/superseding range requests when scrubbing to find a
-// moov atom at the end of a non-fast-start video, and Electron's
-// protocol.handle has a cancellation race with long-lived streamed
-// Response bodies on large files that corrupts those concurrent reads.
-// Bounded synchronous reads (no live stream to race against) sidestep it.
+// Cap how much of a file we read per request, so a large video never sits in
+// memory whole. Over HTTP, Chromium asks for the next range when a capped 206
+// body ends (see media-server.ts for why media is not served over a custom
+// scheme). Reads are bounded and synchronous: no live stream to cancel.
 const MEDIA_CHUNK_SIZE = 8 * 1024 * 1024
 
 export function createMediaLibrary(

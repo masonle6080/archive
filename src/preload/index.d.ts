@@ -38,6 +38,8 @@ interface Api {
     setFavorite: (id: number, favorite: boolean) => Promise<void>
   }
   media: {
+    /** `http://127.0.0.1:<port>/<secret>/`; append an encoded file name. */
+    baseUrl: string
     import: (sourcePath: string) => Promise<ImportedMedia>
     getPathForFile: (file: File) => string
   }

@@ -30,12 +30,12 @@ export function Sidebar({
 
   const tabClass = (active: boolean, favorite = false): string =>
     [
-      'w-full text-left px-3 py-2 rounded-sm text-sm tracking-wide transition-colors',
+      'w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors',
       active
-        ? 'text-terracotta-600 font-medium'
+        ? 'bg-line-100 text-ink-800'
         : favorite
-          ? 'text-bark-800 font-semibold hover:text-bark-900'
-          : 'text-bark-500 hover:text-bark-700'
+          ? 'text-ink-800 hover:bg-line-100'
+          : 'text-ink-500 hover:bg-line-100 hover:text-ink-800'
     ].join(' ')
 
   // Where `draggedId` would land if dropped on `targetId` — null if that
@@ -116,14 +116,14 @@ export function Sidebar({
   }
 
   return (
-    <aside className="w-52 shrink-0 border-r border-sage-200/70 px-4 py-8 flex flex-col">
+    <aside className="w-52 shrink-0 border-r border-line-200/70 px-4 py-8 flex flex-col">
       <button
         onClick={onSelectHome}
-        className="font-serif text-lg text-left text-bark-800 hover:text-terracotta-600 transition-colors px-3 mb-1"
+        className="font-serif font-medium text-lg text-left text-ink-800 hover:text-accent-600 transition-colors px-3 mb-1"
       >
         Archive
       </button>
-      <p className="px-3 text-xs italic text-bark-400 mb-8">{todaysJournalLine()}</p>
+      <p className="px-3 text-xs text-ink-400 mb-8">{todaysJournalLine()}</p>
       <nav className="flex flex-col gap-1">
         <button
           onClick={() => onSelectCategory(null)}
@@ -137,7 +137,7 @@ export function Sidebar({
             key={c.id}
             className={[
               'group flex items-center border-t-2 transition-colors',
-              dragOverId === c.id ? 'border-terracotta-400' : 'border-transparent'
+              dragOverId === c.id ? 'border-accent-400' : 'border-transparent'
             ].join(' ')}
             onDragOver={(e) => {
               e.preventDefault()
@@ -153,7 +153,7 @@ export function Sidebar({
                 onChange={(e) => setRenameValue(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && commitRename()}
                 onBlur={commitRename}
-                className="flex-1 text-sm bg-transparent outline-none border-b border-sage-300 px-3 py-2"
+                className="flex-1 text-sm bg-transparent outline-none border-b border-line-300 px-3 py-2"
               />
             ) : (
               <>
@@ -162,8 +162,8 @@ export function Sidebar({
                   className={[
                     'shrink-0 px-1 transition-opacity',
                     c.favorite
-                      ? 'text-terracotta-500'
-                      : 'text-bark-300 opacity-0 group-hover:opacity-100 hover:text-terracotta-400'
+                      ? 'text-accent-500'
+                      : 'text-ink-300 opacity-0 group-hover:opacity-100 hover:text-accent-400'
                   ].join(' ')}
                   aria-label={c.favorite ? 'Unfavorite category' : 'Favorite category'}
                 >
@@ -187,7 +187,7 @@ export function Sidebar({
                 setDraggedId(null)
                 setDragOverId(null)
               }}
-              className="opacity-0 group-hover:opacity-100 transition-opacity text-bark-300 hover:text-bark-500 select-none cursor-grab active:cursor-grabbing px-1 shrink-0"
+              className="opacity-0 group-hover:opacity-100 transition-opacity text-ink-300 hover:text-ink-500 select-none cursor-grab active:cursor-grabbing px-1 shrink-0"
               aria-hidden
             >
               ⠿
@@ -210,12 +210,12 @@ export function Sidebar({
           }}
           onBlur={commitAdd}
           placeholder="Category name…"
-          className="mt-3 mx-3 text-sm bg-transparent outline-none border-b border-sage-300 py-1 placeholder:text-bark-300"
+          className="mt-3 mx-3 text-sm bg-transparent outline-none border-b border-line-300 py-1 placeholder:text-ink-300"
         />
       ) : (
         <button
           onClick={() => setAdding(true)}
-          className="mt-3 px-3 text-left text-sm text-bark-400 hover:text-terracotta-600 transition-colors"
+          className="mt-3 px-3 text-left text-sm text-ink-400 hover:text-accent-600 transition-colors"
         >
           + New category
         </button>
@@ -226,8 +226,8 @@ export function Sidebar({
       <button
         onClick={onSelectSettings}
         className={[
-          'px-3 text-left text-xs uppercase tracking-widest transition-colors',
-          route.kind === 'settings' ? 'text-terracotta-600' : 'text-bark-400 hover:text-terracotta-600'
+          'px-3 text-left text-xs font-medium transition-colors',
+          route.kind === 'settings' ? 'text-accent-600' : 'text-ink-400 hover:text-accent-600'
         ].join(' ')}
       >
         Settings

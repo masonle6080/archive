@@ -3,60 +3,56 @@
 @tailwind utilities;
 
 @layer base {
+  /* Matches the Memnon frontend: dark is its charcoal surfaces, ivory text and
+     parchment accent; light is a warm counterpart of the same steps. */
   :root {
-    --color-paper: 245 241 232;
+    --color-paper: 247 245 240;
 
-    --color-sage-50: 242 245 240;
-    --color-sage-100: 227 233 221;
-    --color-sage-200: 200 212 189;
-    --color-sage-300: 169 187 152;
-    --color-sage-400: 140 163 120;
-    --color-sage-500: 113 137 93;
-    --color-sage-600: 88 109 71;
-    --color-sage-700: 70 86 58;
-    --color-sage-800: 58 70 48;
-    --color-sage-900: 49 58 42;
+    --color-line-50: 239 236 229;
+    --color-line-100: 231 227 218;
+    --color-line-200: 220 215 204;
+    --color-line-300: 201 195 182;
 
-    --color-bark-300: 196 184 168;
-    --color-bark-400: 138 125 111;
-    --color-bark-500: 111 98 85;
-    --color-bark-600: 88 77 66;
-    --color-bark-700: 69 60 52;
-    --color-bark-800: 51 44 38;
+    --color-ink-300: 170 164 153;
+    --color-ink-400: 134 130 122;
+    --color-ink-500: 107 103 95;
+    --color-ink-600: 85 81 74;
+    --color-ink-700: 58 55 50;
+    --color-ink-800: 31 29 26;
+    --color-ink-900: 18 17 15;
 
-    --color-terracotta-400: 217 140 101;
-    --color-terracotta-500: 196 111 69;
-    --color-terracotta-600: 168 89 54;
+    --color-accent-400: 179 166 133;
+    --color-accent-500: 133 117 83;
+    --color-accent-600: 107 93 64;
+
+    --color-rose-600: 162 76 70;
   }
 
   .dark {
-    --color-paper: 28 24 21;
+    --color-paper: 25 25 25;
 
-    --color-sage-50: 42 46 38;
-    --color-sage-100: 50 55 45;
-    --color-sage-200: 58 64 52;
-    --color-sage-300: 74 82 66;
-    --color-sage-400: 94 104 80;
-    --color-sage-500: 118 132 100;
-    --color-sage-600: 148 164 126;
-    --color-sage-700: 176 190 156;
-    --color-sage-800: 200 212 189;
-    --color-sage-900: 224 232 216;
+    --color-line-50: 33 33 33;
+    --color-line-100: 40 40 40;
+    --color-line-200: 54 54 54;
+    --color-line-300: 71 71 71;
 
-    --color-bark-300: 107 98 88;
-    --color-bark-400: 150 140 128;
-    --color-bark-500: 176 166 152;
-    --color-bark-600: 196 188 176;
-    --color-bark-700: 224 217 206;
-    --color-bark-800: 240 235 227;
+    --color-ink-300: 96 93 87;
+    --color-ink-400: 134 130 122;
+    --color-ink-500: 157 152 143;
+    --color-ink-600: 179 174 164;
+    --color-ink-700: 211 206 196;
+    --color-ink-800: 236 232 223;
+    --color-ink-900: 245 242 236;
 
-    --color-terracotta-400: 224 152 112;
-    --color-terracotta-500: 214 130 88;
-    --color-terracotta-600: 224 122 76;
+    --color-accent-400: 168 157 134;
+    --color-accent-500: 219 208 184;
+    --color-accent-600: 201 189 163;
+
+    --color-rose-600: 217 140 132;
   }
 
   body {
-    @apply bg-paper text-bark-700 font-sans antialiased;
+    @apply bg-paper text-ink-700 font-sans antialiased;
   }
 
   /* macOS "Always show scrollbars" renders Chromium's default gray track
@@ -69,45 +65,55 @@
     background: transparent;
   }
   main::-webkit-scrollbar-thumb {
-    background-color: rgb(var(--color-bark-300) / 0.5);
+    background-color: rgb(var(--color-ink-300) / 0.5);
     border: 3px solid transparent;
     background-clip: content-box;
     border-radius: 9999px;
   }
   main::-webkit-scrollbar-thumb:hover {
-    background-color: rgb(var(--color-bark-400) / 0.7);
+    background-color: rgb(var(--color-ink-400) / 0.7);
   }
 }
 
 @layer components {
   .prose-journal {
-    @apply font-serif text-bark-700 leading-relaxed;
+    @apply text-ink-700 leading-7;
   }
   .prose-journal h1,
   .prose-journal h2,
   .prose-journal h3 {
-    @apply font-serif text-bark-800 mt-8 mb-3;
+    @apply font-semibold tracking-tight text-ink-800 mt-8 mb-3;
+  }
+  .prose-journal h1,
+  .prose-journal h2 {
+    @apply font-serif font-medium;
   }
   .prose-journal p {
     @apply mb-5;
   }
   .prose-journal a {
-    @apply text-terracotta-600 underline underline-offset-2 decoration-terracotta-400/50;
+    @apply text-accent-600 underline underline-offset-4 decoration-accent-600/30 hover:decoration-accent-600;
   }
   .prose-journal img {
-    @apply rounded-sm my-6 sepia-[.15] saturate-[.85];
+    @apply rounded-md my-6;
   }
   .prose-journal blockquote {
-    @apply border-l-2 border-sage-300 pl-4 italic text-bark-500;
+    @apply border-l-2 border-line-300 pl-4 text-ink-500;
   }
   .prose-journal ul,
   .prose-journal ol {
     @apply mb-5 pl-5;
   }
+  .prose-journal ul {
+    @apply list-disc;
+  }
+  .prose-journal ol {
+    @apply list-decimal;
+  }
   .prose-journal li {
     @apply mb-1;
   }
   .prose-journal code {
-    @apply font-sans text-sm bg-sage-50 px-1 py-0.5 rounded-sm;
+    @apply font-mono text-[0.875em] bg-line-100 px-1 py-0.5 rounded;
   }
 }

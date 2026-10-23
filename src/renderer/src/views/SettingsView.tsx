@@ -37,7 +37,7 @@ export function SettingsView({
   useEffect(() => setQuotes(settings?.quotes ?? []), [settings?.quotes])
   useEffect(() => setTheme(themeSource), [themeSource])
 
-  if (!settings) return <p className="text-sm text-bark-400">Loading…</p>
+  if (!settings) return <p className="text-sm text-ink-400">Loading…</p>
 
   const dirty =
     name.trim() !== settings.userName || theme !== themeSource || !quotesEqual(quotes, settings.quotes)
@@ -93,13 +93,13 @@ export function SettingsView({
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-8">
-        <h2 className="font-serif text-2xl text-bark-800">Settings</h2>
+        <h2 className="font-serif font-medium text-2xl text-ink-800">Settings</h2>
         <div className="flex items-center gap-3">
-          {justSaved && <span className="text-xs text-bark-400">Saved</span>}
+          {justSaved && <span className="text-xs text-ink-400">Saved</span>}
           <button
             onClick={save}
             disabled={!dirty || saving}
-            className="text-sm text-terracotta-600 hover:text-terracotta-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="inline-flex items-center h-8 px-3 rounded-lg text-sm font-medium bg-accent-600 text-paper hover:bg-accent-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Save
           </button>
@@ -107,7 +107,7 @@ export function SettingsView({
       </div>
 
       <div className="mb-10">
-        <h3 className="text-xs uppercase tracking-widest text-bark-400 mb-3">Your name</h3>
+        <h3 className="text-xs font-medium text-ink-400 mb-3">Your name</h3>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -115,14 +115,14 @@ export function SettingsView({
             if (e.key === 'Enter') e.currentTarget.blur()
           }}
           placeholder="What should we call you?"
-          className="w-full text-sm text-bark-600 bg-transparent outline-none border-b border-sage-200 placeholder:text-bark-300 py-1"
+          className="w-full text-sm text-ink-600 bg-transparent outline-none border-b border-line-200 placeholder:text-ink-300 py-1"
         />
       </div>
 
       <Divider className="mb-8" />
 
       <div className="mb-10">
-        <h3 className="text-xs uppercase tracking-widest text-bark-400 mb-3">Theme</h3>
+        <h3 className="text-xs font-medium text-ink-400 mb-3">Theme</h3>
         <div className="flex gap-4">
           {THEME_OPTIONS.map((opt) => (
             <button
@@ -130,7 +130,7 @@ export function SettingsView({
               onClick={() => setTheme(opt.value)}
               className={[
                 'text-sm transition-colors',
-                theme === opt.value ? 'text-terracotta-600 font-medium' : 'text-bark-500 hover:text-bark-700'
+                theme === opt.value ? 'bg-line-100 text-ink-800' : 'text-ink-500 hover:bg-line-100 hover:text-ink-800'
               ].join(' ')}
             >
               {opt.label}
@@ -142,7 +142,7 @@ export function SettingsView({
       <Divider className="mb-8" />
 
       <div>
-        <h3 className="text-xs uppercase tracking-widest text-bark-400 mb-3">Quote bank</h3>
+        <h3 className="text-xs font-medium text-ink-400 mb-3">Quote bank</h3>
         <div className="flex flex-col gap-3 mb-4">
           {quotes.map((q, i) => (
             <div key={i} className="group flex items-start gap-2">
@@ -160,26 +160,26 @@ export function SettingsView({
                       cancelEdit()
                     }
                   }}
-                  className="flex-1 text-sm text-bark-600 bg-transparent outline-none border-b border-sage-300 py-0.5"
+                  className="flex-1 text-sm text-ink-600 bg-transparent outline-none border-b border-line-300 py-0.5"
                 />
               ) : (
                 <p
                   onClick={() => startEdit(i)}
-                  className="flex-1 text-sm text-bark-600 cursor-text hover:text-bark-800 transition-colors"
+                  className="flex-1 text-sm text-ink-600 cursor-text hover:text-ink-800 transition-colors"
                 >
                   {q}
                 </p>
               )}
               <button
                 onClick={() => removeQuote(i)}
-                className="shrink-0 text-bark-300 opacity-0 transition-opacity hover:text-terracotta-600 group-hover:opacity-100"
+                className="shrink-0 text-ink-300 opacity-0 transition-opacity hover:text-accent-600 group-hover:opacity-100"
                 aria-label="Remove quote"
               >
                 ×
               </button>
             </div>
           ))}
-          {quotes.length === 0 && <p className="text-sm text-bark-400">No quotes yet.</p>}
+          {quotes.length === 0 && <p className="text-sm text-ink-400">No quotes yet.</p>}
         </div>
         {addingQuote ? (
           <input
@@ -195,12 +195,12 @@ export function SettingsView({
             }}
             onBlur={commitAddQuote}
             placeholder="Quote…"
-            className="w-full text-sm bg-transparent outline-none border-b border-sage-300 py-1 placeholder:text-bark-300"
+            className="w-full text-sm bg-transparent outline-none border-b border-line-300 py-1 placeholder:text-ink-300"
           />
         ) : (
           <button
             onClick={() => setAddingQuote(true)}
-            className="text-left text-sm text-bark-400 hover:text-terracotta-600 transition-colors"
+            className="text-left text-sm text-ink-400 hover:text-accent-600 transition-colors"
           >
             + Add quote
           </button>

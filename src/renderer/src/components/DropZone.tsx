@@ -31,7 +31,7 @@ export function DropZone({
       onClick={() => inputRef.current?.click()}
       className={[
         'cursor-pointer transition-colors',
-        dragging ? 'bg-sage-50' : '',
+        dragging ? 'bg-line-50' : '',
         className
       ].join(' ')}
     >

@@ -1,3 +1,3 @@
 export function mediaUrl(fileName: string): string {
-  return `media://${encodeURIComponent(fileName)}`
+  return window.api.media.baseUrl + encodeURIComponent(fileName)
 }

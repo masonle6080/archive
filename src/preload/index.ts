@@ -13,6 +13,10 @@ import type {
   Settings
 } from '../shared/types'
 
+// Set by the main process; see createWindow.
+const mediaBaseUrl =
+  process.argv.find((arg) => arg.startsWith('--media-base-url='))?.slice('--media-base-url='.length) ?? ''
+
 const MENU_CHANNELS = ['menu:new-entry', 'menu:save'] as const
 type MenuChannel = (typeof MENU_CHANNELS)[number]
 
@@ -52,6 +56,7 @@ const api = {
       ipcRenderer.invoke('categories:setFavorite', id, favorite)
   },
   media: {
+    baseUrl: mediaBaseUrl,
     import: (sourcePath: string): Promise<ImportedMedia> =>
       ipcRenderer.invoke('media:import', sourcePath),
     getPathForFile: (file: File): string => webUtils.getPathForFile(file)

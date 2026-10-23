@@ -283,7 +283,7 @@ export function EntryPage({
   }, [mode, draft, savedDetail])
 
   if (mode === 'view') {
-    if (!savedDetail) return <p className="text-sm text-bark-400">Loading…</p>
+    if (!savedDetail) return <p className="text-sm text-ink-400">Loading…</p>
 
     const createdLabel = formatDate(savedDetail.createdAt)
     const updatedLabel = formatDate(savedDetail.updatedAt)
@@ -291,19 +291,19 @@ export function EntryPage({
 
     return (
       <FadeIn>
-        <button onClick={onDone} className="text-sm text-bark-400 hover:text-terracotta-600 mb-8">
+        <button onClick={onDone} className="text-sm text-ink-400 hover:text-accent-600 mb-8">
           ← Back
         </button>
 
-        <p className="text-xs text-bark-400 tracking-wide mb-2">
+        <p className="text-xs text-ink-400 tracking-wide mb-2">
           Created {createdLabel}
           {wasEdited && <> · Updated {updatedLabel}</>}
         </p>
         <div className="flex items-center justify-between gap-4 mb-3">
-          <h1 className="font-serif text-3xl text-bark-800">{savedDetail.title}</h1>
+          <h1 className="font-serif font-medium text-3xl text-ink-800">{savedDetail.title}</h1>
           <button
             onClick={startEdit}
-            className="text-sm text-terracotta-600 hover:text-terracotta-500 transition-colors shrink-0"
+            className="inline-flex items-center h-8 px-3 rounded-lg text-sm font-medium bg-accent-600 text-paper hover:bg-accent-500 transition-colors shrink-0"
           >
             Edit
           </button>
@@ -317,10 +317,10 @@ export function EntryPage({
             <img
               src={mediaUrl(savedDetail.coverImagePath)}
               alt=""
-              className="w-full h-72 object-cover rounded-sm sepia-[.15] saturate-[.85]"
+              className="w-full h-72 object-cover rounded-lg"
             />
             {savedDetail.coverImageCaption && (
-              <figcaption className="text-xs text-bark-400 italic mt-2">
+              <figcaption className="text-xs text-ink-400 mt-2">
                 {savedDetail.coverImageCaption}
               </figcaption>
             )}
@@ -340,7 +340,7 @@ export function EntryPage({
                   key={m.id}
                   src={mediaUrl(m.filePath)}
                   alt={m.altText ?? ''}
-                  className="w-full rounded-sm sepia-[.15] saturate-[.85]"
+                  className="w-full rounded-lg"
                 />
               ) : (
                 <video
@@ -348,7 +348,7 @@ export function EntryPage({
                   src={mediaUrl(m.filePath)}
                   controls
                   preload="none"
-                  className="w-full rounded-sm"
+                  className="w-full rounded-lg"
                 />
               )
             )}
@@ -359,10 +359,10 @@ export function EntryPage({
   }
 
   // edit mode
-  if (!draft) return <p className="text-sm text-bark-400">Loading…</p>
+  if (!draft) return <p className="text-sm text-ink-400">Loading…</p>
 
   const panelButtonClass = (active: boolean): string =>
-    ['text-sm transition-colors', active ? 'text-terracotta-600' : 'text-bark-500 hover:text-terracotta-600'].join(
+    ['text-sm transition-colors', active ? 'text-accent-600' : 'text-ink-500 hover:text-accent-600'].join(
       ' '
     )
 
@@ -374,19 +374,19 @@ export function EntryPage({
     <div className="pb-16 flex gap-10 items-start">
       <div className="flex-1 max-w-2xl min-w-0">
         <div className="flex items-center justify-between mb-8">
-          <button onClick={backFromEdit} className="text-sm text-bark-400 hover:text-terracotta-600">
+          <button onClick={backFromEdit} className="text-sm text-ink-400 hover:text-accent-600">
             ← {savedDetail ? 'Back' : 'Back to list'}
           </button>
           <button
             disabled={saving}
             onClick={save}
-            className="text-sm text-terracotta-600 hover:text-terracotta-500 disabled:opacity-50 transition-colors"
+            className="inline-flex items-center h-8 px-3 rounded-lg text-sm font-medium bg-accent-600 text-paper hover:bg-accent-500 disabled:opacity-50 transition-colors"
           >
             Save
           </button>
         </div>
 
-        {error && <p className="text-sm text-terracotta-600 mb-4">{error}</p>}
+        {error && <p className="text-sm text-rose-600 mb-4">{error}</p>}
 
         <div className="flex items-center gap-4 mb-2">
           <input
@@ -402,7 +402,7 @@ export function EntryPage({
               )
             }
             placeholder="Entry title"
-            className="flex-1 min-w-0 font-serif text-3xl text-bark-800 bg-transparent outline-none placeholder:text-bark-300"
+            className="flex-1 min-w-0 font-serif font-medium text-3xl text-ink-800 bg-transparent outline-none placeholder:text-ink-300"
           />
           <div className="flex items-center gap-4 shrink-0">
             <button onClick={() => selectPanel('brainstorm')} className={panelButtonClass(sidePanel === 'brainstorm')}>
@@ -414,7 +414,7 @@ export function EntryPage({
               </button>
             )}
             {savedDetail && (
-              <button onClick={handleDelete} className="text-sm text-bark-400 hover:text-terracotta-600">
+              <button onClick={handleDelete} className="text-sm text-ink-400 hover:text-accent-600">
                 Delete
               </button>
             )}
@@ -423,23 +423,23 @@ export function EntryPage({
 
         {previewRevision ? (
           <div>
-            <div className="flex items-center justify-between gap-4 mb-6 px-4 py-3 rounded-sm border border-terracotta-400/50 bg-sage-50">
+            <div className="flex items-center justify-between gap-4 mb-6 px-4 py-3 rounded-lg border border-accent-400/50 bg-line-50">
               <div>
-                <p className="text-xs uppercase tracking-widest text-terracotta-600 mb-0.5">
+                <p className="text-xs font-medium text-accent-600 mb-0.5">
                   Viewing an earlier version
                 </p>
-                <p className="text-sm text-bark-600">{formatDateTime(previewRevision.createdAt)}</p>
+                <p className="text-sm text-ink-600">{formatDateTime(previewRevision.createdAt)}</p>
               </div>
               <div className="flex items-center gap-4 shrink-0">
                 <button
                   onClick={() => setPreviewRevisionId(null)}
-                  className="text-sm text-bark-500 hover:text-terracotta-600 transition-colors"
+                  className="text-sm text-ink-500 hover:text-accent-600 transition-colors"
                 >
                   Return to editing
                 </button>
                 <button
                   onClick={() => revert(previewRevision.id)}
-                  className="text-sm text-terracotta-600 hover:text-terracotta-500 transition-colors"
+                  className="inline-flex items-center h-8 px-3 rounded-lg text-sm font-medium bg-accent-600 text-paper hover:bg-accent-500 transition-colors"
                 >
                   Restore this version
                 </button>
@@ -447,10 +447,10 @@ export function EntryPage({
             </div>
 
             {!previewDetail ? (
-              <p className="text-sm text-bark-400">Loading…</p>
+              <p className="text-sm text-ink-400">Loading…</p>
             ) : (
               <div className="opacity-80">
-                <h2 className="font-serif text-2xl text-bark-800 mb-2">{previewDetail.title}</h2>
+                <h2 className="font-serif font-medium text-2xl text-ink-800 mb-2">{previewDetail.title}</h2>
                 {previewDetail.categories.length > 0 && (
                   <div className="mb-4">
                     <TagList tags={previewDetail.categories} />
@@ -461,17 +461,17 @@ export function EntryPage({
                     <img
                       src={mediaUrl(previewDetail.coverImagePath)}
                       alt=""
-                      className="w-full h-64 object-cover rounded-sm grayscale-[.3] sepia-[.4] saturate-[.6]"
+                      className="w-full h-64 object-cover rounded-lg"
                     />
                     {previewDetail.coverImageCaption && (
-                      <figcaption className="text-xs text-bark-400 italic mt-2">
+                      <figcaption className="text-xs text-ink-400 mt-2">
                         {previewDetail.coverImageCaption}
                       </figcaption>
                     )}
                   </figure>
                 )}
                 {previewDetail.excerpt && (
-                  <p className="text-sm text-bark-500 italic mb-4">{previewDetail.excerpt}</p>
+                  <p className="text-sm text-ink-500 mb-4">{previewDetail.excerpt}</p>
                 )}
                 <article
                   className="prose-journal"
@@ -482,14 +482,14 @@ export function EntryPage({
           </div>
         ) : (
           <>
-            <div className="flex items-center gap-2 text-sm text-bark-400 mb-6">
+            <div className="flex items-center gap-2 text-sm text-ink-400 mb-6">
               <span>slug:</span>
               <input
                 value={draft.slug}
                 onChange={(e) =>
                   setDraft((d) => d && { ...d, slug: slugify(e.target.value), slugTouched: true })
                 }
-                className="flex-1 bg-transparent outline-none border-b border-transparent focus:border-sage-300 text-bark-600"
+                className="flex-1 bg-transparent outline-none border-b border-transparent focus:border-line-300 text-ink-600"
               />
             </div>
 
@@ -504,7 +504,7 @@ export function EntryPage({
               }}
               placeholder="One or two sentences for the list…"
               rows={2}
-              className="w-full text-sm text-bark-600 bg-transparent outline-none placeholder:text-bark-300 mb-6 resize-none"
+              className="w-full text-sm text-ink-600 bg-transparent outline-none placeholder:text-ink-300 mb-6 resize-none"
             />
 
             <CategoryPicker
@@ -515,20 +515,20 @@ export function EntryPage({
 
             <Divider className="my-6" />
 
-            <p className="text-xs uppercase tracking-widest text-bark-400 mb-2">Cover image</p>
+            <p className="text-xs font-medium text-ink-400 mb-2">Cover image</p>
             {draft.coverImagePath ? (
               <div className="mb-6">
                 <div className="relative group">
                   <img
                     src={mediaUrl(draft.coverImagePath)}
                     alt=""
-                    className="w-full h-48 object-cover rounded-sm sepia-[.15] saturate-[.85]"
+                    className="w-full h-48 object-cover rounded-lg"
                   />
                   <button
                     onClick={() =>
                       setDraft((d) => d && { ...d, coverImagePath: null, coverImageCaption: '' })
                     }
-                    className="absolute top-2 right-2 text-xs px-2 py-1 rounded-sm bg-paper/90 text-bark-600 hover:text-terracotta-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute top-2 right-2 text-xs px-2 py-1 rounded-lg bg-paper/90 text-ink-600 hover:text-accent-600 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     Remove
                   </button>
@@ -539,12 +539,12 @@ export function EntryPage({
                     setDraft((d) => d && { ...d, coverImageCaption: e.target.value })
                   }
                   placeholder="Caption for the cover photo…"
-                  className="w-full text-sm text-bark-600 bg-transparent outline-none border-b border-transparent focus:border-sage-300 placeholder:text-bark-300 mt-2 py-1"
+                  className="w-full text-sm text-ink-600 bg-transparent outline-none border-b border-transparent focus:border-line-300 placeholder:text-ink-300 mt-2 py-1"
                 />
               </div>
             ) : (
               <DropZone onFiles={handleCoverDrop} accept="image/*" className="mb-6">
-                <div className="w-full h-32 border border-dashed border-sage-300 rounded-sm flex items-center justify-center text-sm text-bark-400">
+                <div className="w-full h-32 border border-dashed border-line-300 rounded-lg flex items-center justify-center text-sm text-ink-400">
                   Drag an image here, or click to browse
                 </div>
               </DropZone>
@@ -552,9 +552,9 @@ export function EntryPage({
 
             <Divider className="mb-6" />
 
-            <p className="text-xs uppercase tracking-widest text-bark-400 mb-2">Media</p>
+            <p className="text-xs font-medium text-ink-400 mb-2">Media</p>
             <DropZone onFiles={handleGalleryDrop} multiple className="mb-3">
-              <div className="w-full h-20 border border-dashed border-sage-300 rounded-sm flex items-center justify-center text-sm text-bark-400">
+              <div className="w-full h-20 border border-dashed border-line-300 rounded-lg flex items-center justify-center text-sm text-ink-400">
                 Drag images or video here, or click to browse
               </div>
             </DropZone>
@@ -567,12 +567,12 @@ export function EntryPage({
                       <img
                         src={mediaUrl(m.filePath)}
                         alt=""
-                        className="w-20 h-20 object-cover rounded-sm shrink-0 sepia-[.15] saturate-[.85]"
+                        className="w-20 h-20 object-cover rounded-lg shrink-0"
                       />
                     ) : (
                       <video
                         src={mediaUrl(m.filePath)}
-                        className="w-20 h-20 object-cover rounded-sm shrink-0"
+                        className="w-20 h-20 object-cover rounded-lg shrink-0"
                       />
                     )}
                     <input
@@ -589,7 +589,7 @@ export function EntryPage({
                         )
                       }
                       placeholder="alt text"
-                      className="flex-1 text-sm bg-transparent outline-none border-b border-sage-200 placeholder:text-bark-300 py-1"
+                      className="flex-1 text-sm bg-transparent outline-none border-b border-line-200 placeholder:text-ink-300 py-1"
                     />
                     <button
                       onClick={() =>
@@ -597,7 +597,7 @@ export function EntryPage({
                           (d) => d && { ...d, media: d.media.filter((item) => item.id !== m.id) }
                         )
                       }
-                      className="text-xs text-bark-400 hover:text-terracotta-600 shrink-0 mt-1"
+                      className="text-xs text-ink-400 hover:text-accent-600 shrink-0 mt-1"
                     >
                       Remove
                     </button>
@@ -608,7 +608,7 @@ export function EntryPage({
 
             <Divider className="mb-6" />
 
-            <p className="text-xs uppercase tracking-widest text-bark-400 mb-2">Body (Markdown)</p>
+            <p className="text-xs font-medium text-ink-400 mb-2">Body (Markdown)</p>
 
             <textarea
               ref={bodyRef}
@@ -616,19 +616,19 @@ export function EntryPage({
               onChange={(e) => setDraft((d) => d && { ...d, body: e.target.value })}
               placeholder="Write in Markdown…"
               rows={4}
-              className="w-full font-serif text-base text-bark-700 leading-relaxed bg-transparent outline-none placeholder:text-bark-300 mb-6 resize-none overflow-hidden"
+              className="w-full text-base text-ink-700 leading-relaxed bg-transparent outline-none placeholder:text-ink-300 mb-6 resize-none overflow-hidden"
             />
           </>
         )}
       </div>
 
       {sidePanel === 'brainstorm' && (
-        <div className="flex-1 min-w-0 border-l border-sage-200/70 pl-10 sticky top-0">
+        <div className="flex-1 min-w-0 border-l border-line-200/70 pl-10 sticky top-0">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs uppercase tracking-widest text-bark-400">Brainstorm</p>
+            <p className="text-xs font-medium text-ink-400">Brainstorm</p>
             <button
               onClick={() => selectPanel('brainstorm')}
-              className="text-xs text-bark-400 hover:text-terracotta-600"
+              className="text-xs text-ink-400 hover:text-accent-600"
             >
               Close
             </button>
@@ -639,24 +639,24 @@ export function EntryPage({
             onChange={(e) => setDraft((d) => d && { ...d, brainstorm: e.target.value })}
             placeholder="Loose notes, outline, half-formed ideas…"
             rows={28}
-            className="w-full font-serif text-base text-bark-700 leading-relaxed bg-transparent outline-none placeholder:text-bark-300 resize-y"
+            className="w-full text-base text-ink-700 leading-relaxed bg-transparent outline-none placeholder:text-ink-300 resize-y"
           />
         </div>
       )}
 
       {sidePanel === 'history' && (
-        <div className="w-72 shrink-0 border-l border-sage-200/70 pl-10 sticky top-0">
+        <div className="w-72 shrink-0 border-l border-line-200/70 pl-10 sticky top-0">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs uppercase tracking-widest text-bark-400">History</p>
+            <p className="text-xs font-medium text-ink-400">History</p>
             <button
               onClick={() => selectPanel('history')}
-              className="text-xs text-bark-400 hover:text-terracotta-600"
+              className="text-xs text-ink-400 hover:text-accent-600"
             >
               Close
             </button>
           </div>
           {revisions.length === 0 ? (
-            <p className="text-sm text-bark-400">No edits yet — this history fills in each time you save.</p>
+            <p className="text-sm text-ink-400">No edits yet — this history fills in each time you save.</p>
           ) : (
             <div className="flex flex-col">
               {revisions.map((r, i) => {
@@ -668,14 +668,14 @@ export function EntryPage({
                         onClick={() => togglePreview(r.id)}
                         className={[
                           'text-sm transition-colors text-left',
-                          active ? 'text-terracotta-600' : 'text-bark-700 hover:text-terracotta-600'
+                          active ? 'text-accent-600' : 'text-ink-700 hover:text-accent-600'
                         ].join(' ')}
                       >
                         {formatDateTime(r.createdAt)}
                       </button>
                       <button
                         onClick={() => revert(r.id)}
-                        className="text-xs text-terracotta-600 hover:text-terracotta-500 shrink-0"
+                        className="text-xs text-accent-600 hover:text-accent-500 shrink-0"
                       >
                         Revert
                       </button>

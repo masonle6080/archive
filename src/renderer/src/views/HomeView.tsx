@@ -16,7 +16,7 @@ export function HomeView({
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editValue, setEditValue] = useState('')
 
-  if (!settings) return <p className="text-sm text-bark-400">Loading…</p>
+  if (!settings) return <p className="text-sm text-ink-400">Loading…</p>
 
   const quote = quoteOfTheDay(settings.quotes)
 
@@ -53,13 +53,13 @@ export function HomeView({
 
   return (
     <div>
-      <h2 className="font-serif text-2xl text-bark-800 mb-8">
+      <h2 className="font-serif font-medium text-2xl text-ink-800 mb-8">
         Hello{settings.userName ? `, ${settings.userName}` : ''}
       </h2>
 
       {quote && (
         <FadeIn>
-          <blockquote className="font-serif text-lg italic text-bark-600 border-l-2 border-terracotta-300 pl-4 mb-10">
+          <blockquote className="font-serif font-medium text-lg text-ink-500 border-l-2 border-line-200 pl-4 mb-10">
             {quote}
           </blockquote>
         </FadeIn>
@@ -68,7 +68,7 @@ export function HomeView({
       <Divider className="mb-8" />
 
       <div>
-        <h3 className="text-xs uppercase tracking-widest text-bark-400 mb-3">Goals</h3>
+        <h3 className="text-xs font-medium text-ink-400 mb-3">Goals</h3>
         <div className="flex flex-col gap-3 mb-4">
           {settings.goals.map((g, i) => (
             <div key={i} className="group flex items-start gap-2">
@@ -86,26 +86,26 @@ export function HomeView({
                       cancelEdit()
                     }
                   }}
-                  className="flex-1 text-sm text-bark-600 bg-transparent outline-none border-b border-sage-300 py-0.5"
+                  className="flex-1 text-sm text-ink-600 bg-transparent outline-none border-b border-line-300 py-0.5"
                 />
               ) : (
                 <p
                   onClick={() => startEdit(i)}
-                  className="flex-1 text-sm text-bark-600 cursor-text hover:text-bark-800 transition-colors"
+                  className="flex-1 text-sm text-ink-600 cursor-text hover:text-ink-800 transition-colors"
                 >
                   {g}
                 </p>
               )}
               <button
                 onClick={() => removeGoal(i)}
-                className="shrink-0 text-bark-300 opacity-0 transition-opacity hover:text-terracotta-600 group-hover:opacity-100"
+                className="shrink-0 text-ink-300 opacity-0 transition-opacity hover:text-accent-600 group-hover:opacity-100"
                 aria-label="Remove goal"
               >
                 ×
               </button>
             </div>
           ))}
-          {settings.goals.length === 0 && <p className="text-sm text-bark-400">No goals yet.</p>}
+          {settings.goals.length === 0 && <p className="text-sm text-ink-400">No goals yet.</p>}
         </div>
         {adding ? (
           <input
@@ -121,12 +121,12 @@ export function HomeView({
             }}
             onBlur={commitAdd}
             placeholder="Goal…"
-            className="w-full text-sm bg-transparent outline-none border-b border-sage-300 py-1 placeholder:text-bark-300"
+            className="w-full text-sm bg-transparent outline-none border-b border-line-300 py-1 placeholder:text-ink-300"
           />
         ) : (
           <button
             onClick={() => setAdding(true)}
-            className="text-left text-sm text-bark-400 hover:text-terracotta-600 transition-colors"
+            className="text-left text-sm text-ink-400 hover:text-accent-600 transition-colors"
           >
             + Add goal
           </button>

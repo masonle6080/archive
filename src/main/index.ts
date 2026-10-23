@@ -4,7 +4,6 @@ import {
   BrowserWindow,
   Menu,
   ipcMain,
-  protocol,
   nativeImage,
   nativeTheme
 } from 'electron'
@@ -14,14 +13,11 @@ import { getThemeSource, setThemeSource, getSettings, updateSettings } from './s
 import type { ThemeSource, Settings, PostInput } from '../shared/types'
 import { openArchive } from './archive'
 import { findFfmpeg } from './ffmpeg'
-
-protocol.registerSchemesAsPrivileged([
-  { scheme: 'media', privileges: { secure: true, supportFetchAPI: true, stream: true } }
-])
+import { startMediaServer } from './media-server'
 
 const iconPath = join(__dirname, '../../build/icon.png')
 
-function createWindow(): BrowserWindow {
+function createWindow(mediaBaseUrl: string): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -33,7 +29,9 @@ function createWindow(): BrowserWindow {
     icon: nativeImage.createFromPath(iconPath),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      // The preload reads this to build media URLs.
+      additionalArguments: [`--media-base-url=${mediaBaseUrl}`]
     }
   })
 
@@ -143,7 +141,7 @@ function buildMenu(): void {
 app.setName('Archive')
 app.setPath('userData', join(app.getPath('appData'), 'field-notes'))
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.fieldnotes.app')
 
   // Restore the user's theme choice before anything paints — nativeTheme
@@ -173,7 +171,8 @@ app.whenReady().then(() => {
     ffmpegPath: findFfmpeg()
   })
 
-  protocol.handle('media', (request) => archive.media.serve(request))
+  const mediaServer = await startMediaServer(archive.media.serve)
+  app.on('will-quit', () => void mediaServer.close())
 
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('theme:get', () => ({
@@ -237,10 +236,10 @@ app.whenReady().then(() => {
   })
 
   buildMenu()
-  createWindow()
+  createWindow(mediaServer.baseUrl)
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) createWindow(mediaServer.baseUrl)
   })
 })
 
