@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-paper: 245 241 232;
+
+    --color-sage-50: 242 245 240;
+    --color-sage-100: 227 233 221;
+    --color-sage-200: 200 212 189;
+    --color-sage-300: 169 187 152;
+    --color-sage-400: 140 163 120;
+    --color-sage-500: 113 137 93;
+    --color-sage-600: 88 109 71;
+    --color-sage-700: 70 86 58;
+    --color-sage-800: 58 70 48;
+    --color-sage-900: 49 58 42;
+
+    --color-bark-300: 196 184 168;
+    --color-bark-400: 138 125 111;
+    --color-bark-500: 111 98 85;
+    --color-bark-600: 88 77 66;
+    --color-bark-700: 69 60 52;
+    --color-bark-800: 51 44 38;
+
+    --color-terracotta-400: 217 140 101;
+    --color-terracotta-500: 196 111 69;
+    --color-terracotta-600: 168 89 54;
+  }
+
+  .dark {
+    --color-paper: 28 24 21;
+
+    --color-sage-50: 42 46 38;
+    --color-sage-100: 50 55 45;
+    --color-sage-200: 58 64 52;
+    --color-sage-300: 74 82 66;
+    --color-sage-400: 94 104 80;
+    --color-sage-500: 118 132 100;
+    --color-sage-600: 148 164 126;
+    --color-sage-700: 176 190 156;
+    --color-sage-800: 200 212 189;
+    --color-sage-900: 224 232 216;
+
+    --color-bark-300: 107 98 88;
+    --color-bark-400: 150 140 128;
+    --color-bark-500: 176 166 152;
+    --color-bark-600: 196 188 176;
+    --color-bark-700: 224 217 206;
+    --color-bark-800: 240 235 227;
+
+    --color-terracotta-400: 224 152 112;
+    --color-terracotta-500: 214 130 88;
+    --color-terracotta-600: 224 122 76;
+  }
+
+  body {
+    @apply bg-paper text-bark-700 font-sans antialiased;
+  }
+
+  /* macOS "Always show scrollbars" renders Chromium's default gray track
+     even on short pages, reading as a stray UI element — style it to sit
+     quietly instead of matching the OS chrome. */
+  main::-webkit-scrollbar {
+    width: 10px;
+  }
+  main::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  main::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--color-bark-300) / 0.5);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+  main::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--color-bark-400) / 0.7);
+  }
+}
+
+@layer components {
+  .prose-journal {
+    @apply font-serif text-bark-700 leading-relaxed;
+  }
+  .prose-journal h1,
+  .prose-journal h2,
+  .prose-journal h3 {
+    @apply font-serif text-bark-800 mt-8 mb-3;
+  }
+  .prose-journal p {
+    @apply mb-5;
+  }
+  .prose-journal a {
+    @apply text-terracotta-600 underline underline-offset-2 decoration-terracotta-400/50;
+  }
+  .prose-journal img {
+    @apply rounded-sm my-6 sepia-[.15] saturate-[.85];
+  }
+  .prose-journal blockquote {
+    @apply border-l-2 border-sage-300 pl-4 italic text-bark-500;
+  }
+  .prose-journal ul,
+  .prose-journal ol {
+    @apply mb-5 pl-5;
+  }
+  .prose-journal li {
+    @apply mb-1;
+  }
+  .prose-journal code {
+    @apply font-sans text-sm bg-sage-50 px-1 py-0.5 rounded-sm;
+  }
+}
